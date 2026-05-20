@@ -10,7 +10,6 @@ Names - maps variable names and string names to unique integers.
 
 
 class Names:
-
     """Map variable names and string names to unique integers.
 
     This class deals with storing grammatical keywords and user-defined words,
@@ -41,12 +40,15 @@ class Names:
     def __init__(self):
         """Initialise names list."""
         self.error_code_count = 0  # how many error codes have been declared
+        # List position is the name ID used by the rest of the simulator.
+        self.names = []
 
     def unique_error_codes(self, num_error_codes):
         """Return a list of unique integer error codes."""
         if not isinstance(num_error_codes, int):
             raise TypeError("Expected num_error_codes to be an integer.")
         self.error_code_count += num_error_codes
+        # Allocate the next contiguous block without reusing old codes.
         return range(self.error_code_count - num_error_codes,
                      self.error_code_count)
 
@@ -55,15 +57,38 @@ class Names:
 
         If the name string is not present in the names list, return None.
         """
+        if not isinstance(name_string, str):
+            raise TypeError("Expected name_string to be a string.")
+        # Query only reports existing names; it never mutates the table.
+        if name_string in self.names:
+            return self.names.index(name_string)
+        return None
 
     def lookup(self, name_string_list):
         """Return a list of name IDs for each name string in name_string_list.
 
         If the name string is not present in the names list, add it.
         """
+        if not isinstance(name_string_list, list):
+            raise TypeError("Expected name_string_list to be a list.")
+
+        name_ids = []
+        # Lookup interns names, adding each new string exactly once.
+        for name_string in name_string_list:
+            if not isinstance(name_string, str):
+                raise TypeError("Expected all list elements to be strings.")
+            if name_string not in self.names:
+                self.names.append(name_string)
+            name_ids.append(self.names.index(name_string))
+        return name_ids
 
     def get_name_string(self, name_id):
         """Return the corresponding name string for name_id.
 
         If the name_id is not an index in the names list, return None.
         """
+        if not isinstance(name_id, int):
+            raise TypeError("Expected name_id to be an integer.")
+        if name_id < 0 or name_id >= len(self.names):
+            return None
+        return self.names[name_id]
