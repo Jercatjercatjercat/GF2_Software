@@ -11,26 +11,33 @@ Symbol - encapsulates a symbol and stores its properties.
 
 
 class Symbol:
-
     """Encapsulate a symbol and store its properties.
+
+    A symbol is one token produced by the scanner, such as a keyword,
+    name, number, punctuation mark, or end-of-file marker.
 
     Parameters
     ----------
-    No parameters.
+    symbol_type: symbol type, such as KEYWORD, NAME, NUMBER or punctuation.
+    symbol_id: symbol value, such as a name ID, number value or keyword ID.
+    line_number: line on which the symbol starts.
+    position: character position on the line where the symbol starts.
 
     Public methods
     --------------
     No public methods.
     """
 
-    def __init__(self):
+    def __init__(self, symbol_type=None, symbol_id=None, line_number=None,
+                 position=None):
         """Initialise symbol properties."""
-        self.type = None
-        self.id = None
+        self.type = symbol_type
+        self.id = symbol_id
+        self.line_number = line_number
+        self.position = position
 
 
 class Scanner:
-
     """Read circuit definition file and translate the characters into symbols.
 
     Once supplied with the path to a valid definition file, the scanner
