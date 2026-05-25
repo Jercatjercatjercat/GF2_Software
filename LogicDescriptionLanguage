@@ -232,6 +232,11 @@ Detection: when checking a parsed connection, look up both device names in the
 device table.
 Report: semantic error: device G3 has not been declared.
 
+Undefined device in monitor list
+Detection: when checking a parsed monitor signal, look up the device name in
+the device table before checking whether the signal is an output.
+Report: semantic error: monitor refers to undefined device G5.
+
 Input port incompatible with declared device
 Detection: compare the parsed input port with the declared type and properties
 of the destination device.
