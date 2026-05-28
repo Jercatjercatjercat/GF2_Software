@@ -10,7 +10,6 @@ UserInterface - reads and parses user commands.
 
 
 class UserInterface:
-
     """Read and parse user commands.
 
     This class allows the user to enter certain commands.
@@ -40,7 +39,7 @@ class UserInterface:
     skip_spaces(self): Skips whitespace characters until a non-whitespace
                        character is reached.
 
-    read_string(self): Returns the next alphanumeric string.
+    read_string(self): Returns the next name string.
 
     read_name(self): Returns the name ID of the current string.
 
@@ -130,13 +129,13 @@ class UserInterface:
             self.get_character()
 
     def read_string(self):
-        """Return the next alphanumeric string."""
+        """Return the next name string."""
         self.skip_spaces()
         name_string = ""
         if not self.character.isalpha():  # the string must start with a letter
             print("Error! Expected a name.")
             return None
-        while self.character.isalnum():
+        while self.character.isalnum() or self.character == "_":
             name_string = "".join([name_string, self.character])
             self.get_character()
         return name_string
