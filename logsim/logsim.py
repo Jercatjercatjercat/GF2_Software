@@ -13,7 +13,6 @@ Graphical user interface: logsim.py <file path>
 import getopt
 import sys
 
-import wx
 
 from names import Names
 from devices import Devices
@@ -22,7 +21,6 @@ from monitors import Monitors
 from scanner import Scanner
 from parse import Parser
 from userint import UserInterface
-from gui import Gui
 
 
 def main(arg_list):
@@ -72,6 +70,9 @@ def main(arg_list):
         parser = Parser(names, devices, network, monitors, scanner)
         if parser.parse_network():
             # Initialise an instance of the gui.Gui() class
+            import wx
+            from gui import Gui
+
             app = wx.App()
             gui = Gui("Logic Simulator", path, names, devices, network,
                       monitors)
