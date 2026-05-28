@@ -46,6 +46,23 @@ z FF1.QBAR
 q
 ```
 
+Then try the flip-flop switch example:
+
+```bash
+python3 logsim/logsim.py -c examples/example3_flip_flop_switch.txt
+```
+
+At the prompt, try:
+
+```text
+r 10
+c 5
+m FF_SWITCH.Q
+m FF_SWITCH.QBAR
+z FF_SWITCH.QBAR
+q
+```
+
 ## Automated checks
 
 Run:
