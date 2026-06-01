@@ -312,6 +312,8 @@ class Gui(wx.Frame):
         )
         self.run_button = wx.Button(self, wx.ID_ANY, "Run")
         self.continue_button = wx.Button(self, wx.ID_ANY, "Continue")
+        self.status_label = wx.StaticText(self, wx.ID_ANY, "")
+        self.status_label.Wrap(230)
 
         self.switch_label = wx.StaticText(self, wx.ID_ANY, "Switch")
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
@@ -357,6 +359,7 @@ class Gui(wx.Frame):
         run_box.Add(self.cycles_spin, 0, wx.EXPAND | wx.ALL, 6)
         run_box.Add(self.run_button, 0, wx.EXPAND | wx.ALL, 6)
         run_box.Add(self.continue_button, 0, wx.EXPAND | wx.ALL, 6)
+        run_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
 
         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
@@ -374,8 +377,6 @@ class Gui(wx.Frame):
         monitor_box.Add(self.remove_monitor_button, 0,
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
-
-        status_box.Add(self.status_box, 1, wx.EXPAND | wx.ALL, 6)
 
         side_sizer.Add(run_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
@@ -501,7 +502,11 @@ class Gui(wx.Frame):
     def set_status(self, message, error=False):
         """Show a status message to the user."""
         prefix = "Error: " if error else ""
-        self.SetStatusText(
-            prefix + message + "  |  Cycles completed: "
+        status_text = (
+            prefix + message + "\nCycles completed: "
             + str(self.controller.cycles_completed)
         )
+        self.status_label.SetLabel(status_text)
+        self.status_label.Wrap(230)
+        self.SetStatusText(status_text.replace("\n", "  |  "))
+        self.Layout()
