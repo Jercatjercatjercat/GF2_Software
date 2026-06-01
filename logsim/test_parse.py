@@ -213,3 +213,184 @@ def test_parse_rejects_ambiguous_dtype_output(tmp_path):
     )
 
     assert not parser.parse_network()
+
+
+def test_parse_rejects_gate_input_count_outside_range(tmp_path):
+    """Test if parser rejects gates with too many inputs."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            G1 : AND(17);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+        }
+        MONITOR { G1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_undefined_device_in_connection(tmp_path):
+    """Test if parser rejects connections using undeclared devices."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            G1 : AND(1);
+        }
+        CONNECT {
+            SW2 -> G1.I1;
+        }
+        MONITOR { G1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_undefined_device_in_monitor(tmp_path):
+    """Test if parser rejects monitors using undeclared devices."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+        }
+        CONNECT {
+        }
+        MONITOR { SW2 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_input_port_incompatible_with_device(tmp_path):
+    """Test if parser rejects ports beyond a gate's declared input count."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            SW2 : SWITCH(1);
+            G1 : AND(2);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+            SW2 -> G1.I3;
+        }
+        MONITOR { G1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_output_port_incompatible_with_device(tmp_path):
+    """Test if parser rejects dotted outputs on non-DTYPE devices."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            G1 : AND(1);
+            G2 : AND(1);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+            G1.Q -> G2.I1;
+        }
+        MONITOR { G2 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_connection_from_non_output_signal(tmp_path):
+    """Test if parser rejects input signals as connection sources."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            SW2 : SWITCH(1);
+            G1 : AND(2);
+            G2 : AND(1);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+            SW2 -> G1.I2;
+            G1.I1 -> G2.I1;
+        }
+        MONITOR { G2 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_connection_to_non_input_signal(tmp_path):
+    """Test if parser rejects output signals as connection destinations."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            SW2 : SWITCH(1);
+            G1 : AND(1);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+            SW2 -> G1;
+        }
+        MONITOR { G1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_input_connected_more_than_once(tmp_path):
+    """Test if parser rejects duplicate connections to the same input."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            SW2 : SWITCH(1);
+            G1 : AND(1);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+            SW2 -> G1.I1;
+        }
+        MONITOR { G1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+
+
+def test_parse_rejects_monitor_placed_on_non_output_signal(tmp_path):
+    """Test if parser rejects monitor points that are input signals."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            G1 : AND(1);
+        }
+        CONNECT {
+            SW1 -> G1.I1;
+        }
+        MONITOR { G1.I1 };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
