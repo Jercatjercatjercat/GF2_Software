@@ -285,6 +285,7 @@ class Gui(wx.Frame):
         self.controller = GuiController(names, devices, network, monitors)
 
         self.configure_menu()
+        self.CreateStatusBar()
         self.canvas = MyGLCanvas(self, devices, monitors)
         self.create_controls()
         self.configure_layout()
@@ -339,12 +340,6 @@ class Gui(wx.Frame):
         )
 
         self.reset_view_button = wx.Button(self, wx.ID_ANY, "Reset View")
-        self.status_box = wx.TextCtrl(
-            self,
-            wx.ID_ANY,
-            "",
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.BORDER_SIMPLE,
-        )
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
@@ -357,8 +352,6 @@ class Gui(wx.Frame):
                                        wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Monitors"),
                                         wx.VERTICAL)
-        status_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Status"),
-                                       wx.VERTICAL)
 
         run_box.Add(self.cycles_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         run_box.Add(self.cycles_spin, 0, wx.EXPAND | wx.ALL, 6)
@@ -387,7 +380,6 @@ class Gui(wx.Frame):
         side_sizer.Add(run_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
-        side_sizer.Add(status_box, 1, wx.EXPAND | wx.ALL, 6)
 
         main_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
@@ -509,7 +501,7 @@ class Gui(wx.Frame):
     def set_status(self, message, error=False):
         """Show a status message to the user."""
         prefix = "Error: " if error else ""
-        self.status_box.SetValue(
-            prefix + message + "\nCycles completed: "
+        self.SetStatusText(
+            prefix + message + "  |  Cycles completed: "
             + str(self.controller.cycles_completed)
         )
