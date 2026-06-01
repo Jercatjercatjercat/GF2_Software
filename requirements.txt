@@ -1,0 +1,5 @@
+wxPython
+PyOpenGL
+pytest
+pycodestyle
+pydocstyle
