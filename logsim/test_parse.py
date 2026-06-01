@@ -34,6 +34,64 @@ def make_parser(tmp_path, text):
     return parser, names, devices, network, monitors
 
 
+def make_parser_from_path(path):
+    """Create a parser for an existing definition file."""
+    names = Names()
+    devices = Devices(names)
+    network = Network(names, devices)
+    monitors = Monitors(names, devices, network)
+    scanner = Scanner(path, names)
+    parser = Parser(names, devices, network, monitors, scanner)
+    return parser, names, devices, network, monitors
+
+
+@pytest.mark.parametrize("example_path", [
+    Path("examples/example1_mixed_combinational.txt"),
+    Path("examples/example2_clocked_dtype.txt"),
+    Path("examples/example3_flip_flop_switch.txt"),
+])
+def test_parse_example_files(example_path):
+    """Test if the checked-in example definition files parse successfully."""
+    parser, names, devices, network, monitors = make_parser_from_path(
+        example_path
+    )
+
+    assert parser.parse_network()
+
+
+def test_example3_flip_flop_switch_behaviour():
+    """Test if example3 is wired as a toggling DTYPE switch."""
+    parser, names, devices, network, monitors = make_parser_from_path(
+        Path("examples/example3_flip_flop_switch.txt")
+    )
+
+    assert parser.parse_network()
+
+    [ff_id, q_id, qbar_id, data_id] = names.lookup(
+        ["FF_SWITCH", "Q", "QBAR", "DATA"]
+    )
+
+    assert devices.get_device(ff_id).device_kind == devices.D_TYPE
+    assert network.get_connected_output(ff_id, data_id) == (ff_id, qbar_id)
+    assert (ff_id, q_id) in monitors.monitors_dictionary
+    assert (ff_id, qbar_id) in monitors.monitors_dictionary
+
+    for _ in range(20):
+        assert network.execute_network()
+        monitors.record_signals()
+
+    q_trace = monitors.monitors_dictionary[(ff_id, q_id)]
+    qbar_trace = monitors.monitors_dictionary[(ff_id, qbar_id)]
+    settled_pairs = [
+        (q, qbar) for q, qbar in zip(q_trace, qbar_trace)
+        if q in [devices.LOW, devices.HIGH]
+        and qbar in [devices.LOW, devices.HIGH]
+    ]
+
+    assert settled_pairs
+    assert all(qbar == network.invert_signal(q) for q, qbar in settled_pairs)
+
+
 def test_parse_valid_cross_coupled_nand_network(tmp_path):
     """Test if parser builds a valid combinational network."""
     parser, names, devices, network, monitors = make_parser(
