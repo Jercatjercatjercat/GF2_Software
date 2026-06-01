@@ -5,6 +5,8 @@ switch, add a monitor, and remove a monitor.  Signal traces are drawn in an
 OpenGL canvas and can be panned or zoomed with the mouse.
 """
 
+import math
+
 import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLUT
@@ -41,10 +43,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.zoom = 1.0
 
         self.left_margin = 150
-        self.cycle_width = 28
-        self.row_height = 52
-        self.high_offset = 30
-        self.low_offset = 8
+        self.cycle_width = 26
+        self.row_height = 38
+        self.high_offset = 22
+        self.low_offset = 6
+        self.trace_colours = [
+            (0.20, 0.23, 0.78),
+            (0.16, 0.50, 0.26),
+            (0.70, 0.22, 0.22),
+            (0.57, 0.31, 0.70),
+            (0.10, 0.55, 0.62),
+            (0.72, 0.43, 0.12),
+        ]
 
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_SIZE, self.on_size)
@@ -74,26 +84,27 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glScaled(self.zoom, self.zoom, self.zoom)
 
     def render(self):
-        """Draw all current monitor traces."""
+        """Draw the circuit overview and oscilloscope-style traces."""
         self.SetCurrent(self.context)
         if not self.init:
             self.init_gl()
             self.init = True
 
+        size = self.GetClientSize()
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        if not monitor_items:
-            self.render_text("No monitor points selected.", 20, 40)
-            self.finish_render()
-            return
+        circuit_bounds = (18, size.height - 218, size.width - 36, 190)
+        scope_bounds = (18, 28, size.width - 36, size.height - 270)
 
-        self.left_margin = self.calculate_left_margin(monitor_items)
-        self.draw_time_axis(monitor_items)
-        for row_index, monitor_item in enumerate(monitor_items):
-            self.draw_monitor_trace(row_index, monitor_item)
+        if scope_bounds[3] < 240:
+            scope_bounds = (18, 28, size.width - 36, 240)
+            circuit_bounds = (18, 290, size.width - 36, 190)
 
+        self.draw_canvas_grid(size)
+        self.draw_circuit_overview(circuit_bounds)
+        self.draw_oscilloscope(scope_bounds, monitor_items)
         self.finish_render()
 
     def finish_render(self):
@@ -101,113 +112,450 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glFlush()
         self.SwapBuffers()
 
-    def draw_time_axis(self, monitor_items):
-        """Draw a simple cycle scale above the waveforms."""
+    def draw_canvas_grid(self, size):
+        """Draw a faint simulator-style workspace grid."""
+        self.set_colour(0.94, 0.94, 0.90)
+        GL.glBegin(GL.GL_LINES)
+        for x_pos in range(0, size.width + 1, 24):
+            GL.glVertex2f(x_pos, 0)
+            GL.glVertex2f(x_pos, size.height)
+        for y_pos in range(0, size.height + 1, 24):
+            GL.glVertex2f(0, y_pos)
+            GL.glVertex2f(size.width, y_pos)
+        GL.glEnd()
+
+    def draw_circuit_overview(self, bounds):
+        """Draw a compact block diagram of the parsed circuit."""
+        x_pos, y_pos, width, height = bounds
+        self.draw_rectangle(bounds, (0.98, 0.98, 0.95), (0.70, 0.70, 0.62))
+        self.render_text("Circuit overview", x_pos + 10, y_pos + height - 20)
+
+        positions = self.build_device_positions(bounds)
+        self.draw_connections(positions)
+
+        for device in self.devices.devices_list:
+            if device.device_id in positions:
+                self.draw_device_node(device, positions[device.device_id])
+
+    def build_device_positions(self, bounds):
+        """Return a simple layered layout for all devices."""
+        x_pos, y_pos, width, height = bounds
+        layers = self.calculate_device_layers()
+        layer_groups = {}
+        for device in self.devices.devices_list:
+            layer = layers.get(device.device_id, 1)
+            layer_groups.setdefault(layer, []).append(device)
+
+        max_layer = max(layer_groups) if layer_groups else 0
+        positions = {}
+        block_width = 92
+        block_height = 34
+        usable_width = max(width - block_width - 90, 1)
+
+        for layer, devices_in_layer in layer_groups.items():
+            if max_layer == 0:
+                node_x = x_pos + width / 2 - block_width / 2
+            else:
+                node_x = x_pos + 48 + layer * usable_width / max_layer
+
+            count = len(devices_in_layer)
+            available_height = max(height - 58, 1)
+            for index, device in enumerate(devices_in_layer):
+                if count == 1:
+                    node_y = y_pos + height / 2 - block_height / 2 - 4
+                else:
+                    gap = available_height / (count - 1)
+                    node_y = y_pos + height - 58 - index * gap
+                positions[device.device_id] = (
+                    node_x, node_y, block_width, block_height
+                )
+
+        return positions
+
+    def calculate_device_layers(self):
+        """Group devices by dependency depth for circuit drawing."""
+        layers = {}
+        for device in self.devices.devices_list:
+            if not device.inputs:
+                layers[device.device_id] = 0
+
+        for _ in self.devices.devices_list:
+            changed = False
+            for device in self.devices.devices_list:
+                if device.device_id in layers:
+                    continue
+
+                source_layers = []
+                waiting_for_source = False
+                for connected_output in device.inputs.values():
+                    if connected_output is None:
+                        continue
+                    source_device_id, _ = connected_output
+                    if source_device_id == device.device_id:
+                        continue
+                    if source_device_id not in layers:
+                        waiting_for_source = True
+                        break
+                    source_layers.append(layers[source_device_id])
+
+                if not waiting_for_source and source_layers:
+                    layers[device.device_id] = max(source_layers) + 1
+                    changed = True
+
+            if not changed:
+                break
+
+        for device in self.devices.devices_list:
+            if device.device_id not in layers:
+                layers[device.device_id] = 1
+
+        return layers
+
+    def draw_connections(self, positions):
+        """Draw wires between connected device ports."""
+        for target_device in self.devices.devices_list:
+            if target_device.device_id not in positions:
+                continue
+
+            input_ids = self.sorted_port_ids(target_device.inputs)
+            for input_index, input_id in enumerate(input_ids):
+                connected_output = target_device.inputs[input_id]
+                if connected_output is None:
+                    continue
+
+                source_device_id, output_id = connected_output
+                if source_device_id not in positions:
+                    continue
+
+                source_device = self.devices.get_device(source_device_id)
+                source_pos = positions[source_device_id]
+                target_pos = positions[target_device.device_id]
+                start = self.output_pin(source_pos, source_device, output_id)
+                end = self.input_pin(target_pos, target_device, input_id)
+                signal = source_device.outputs.get(output_id)
+                self.draw_connection_line(start, end, signal, input_index)
+
+    def draw_connection_line(self, start, end, signal, input_index):
+        """Draw one routed circuit wire."""
+        x_start, y_start = start
+        x_end, y_end = end
+        self.set_signal_colour(signal)
+        GL.glLineWidth(1.4)
+        GL.glBegin(GL.GL_LINE_STRIP)
+
+        if x_end <= x_start:
+            route_y = max(y_start, y_end) + 28 + 9 * (input_index % 3)
+            GL.glVertex2f(x_start, y_start)
+            GL.glVertex2f(x_start + 18, y_start)
+            GL.glVertex2f(x_start + 18, route_y)
+            GL.glVertex2f(x_end - 18, route_y)
+            GL.glVertex2f(x_end - 18, y_end)
+            GL.glVertex2f(x_end, y_end)
+        else:
+            mid_x = (x_start + x_end) / 2
+            GL.glVertex2f(x_start, y_start)
+            GL.glVertex2f(mid_x, y_start)
+            GL.glVertex2f(mid_x, y_end)
+            GL.glVertex2f(x_end, y_end)
+
+        GL.glEnd()
+        GL.glLineWidth(1.0)
+
+    def draw_device_node(self, device, bounds):
+        """Draw one device as a labelled circuit block."""
+        x_pos, y_pos, width, height = bounds
+        kind = self.devices.names.get_name_string(device.device_kind)
+        name = self.devices.names.get_name_string(device.device_id)
+        fill_colour = self.device_fill_colour(device)
+
+        self.draw_rectangle(bounds, fill_colour, (0.30, 0.30, 0.32))
+        self.render_text(str(name), x_pos + 7, y_pos + height - 15)
+        self.render_text(str(kind), x_pos + 7, y_pos + 10)
+
+        for input_id in self.sorted_port_ids(device.inputs):
+            pin_x, pin_y = self.input_pin(bounds, device, input_id)
+            self.draw_circle(pin_x, pin_y, 3.2, (0.98, 0.98, 0.98))
+
+        for output_id in self.sorted_port_ids(device.outputs):
+            pin_x, pin_y = self.output_pin(bounds, device, output_id)
+            signal = device.outputs.get(output_id)
+            self.draw_circle(pin_x, pin_y, 5.5, self.signal_colour(signal))
+
+    def device_fill_colour(self, device):
+        """Return a fill colour for a device type."""
+        if device.device_kind == self.devices.SWITCH:
+            return (1.00, 0.96, 0.76)
+        if device.device_kind == self.devices.CLOCK:
+            return (0.80, 0.94, 0.82)
+        if device.device_kind == self.devices.D_TYPE:
+            return (0.83, 0.91, 1.00)
+        return (0.95, 0.95, 1.00)
+
+    def input_pin(self, bounds, device, input_id):
+        """Return the position of an input pin."""
+        x_pos, y_pos, _, height = bounds
+        input_ids = self.sorted_port_ids(device.inputs)
+        if input_id not in input_ids:
+            return x_pos, y_pos + height / 2
+
+        index = input_ids.index(input_id)
+        count = len(input_ids)
+        return x_pos, self.distributed_pin_y(y_pos, height, index, count)
+
+    def output_pin(self, bounds, device, output_id):
+        """Return the position of an output pin."""
+        x_pos, y_pos, width, height = bounds
+        output_ids = self.sorted_port_ids(device.outputs)
+        if output_id not in output_ids:
+            return x_pos + width, y_pos + height / 2
+
+        index = output_ids.index(output_id)
+        count = len(output_ids)
+        return (
+            x_pos + width,
+            self.distributed_pin_y(y_pos, height, index, count),
+        )
+
+    def distributed_pin_y(self, y_pos, height, index, count):
+        """Return a vertically distributed pin y coordinate."""
+        if count <= 1:
+            return y_pos + height / 2
+        usable_height = height - 12
+        return y_pos + height - 6 - index * usable_height / (count - 1)
+
+    def draw_oscilloscope(self, bounds, monitor_items):
+        """Draw monitor signals as an oscilloscope-style panel."""
+        x_pos, y_pos, width, height = bounds
+        self.draw_rectangle(bounds, (0.96, 0.96, 0.96), (0.48, 0.48, 0.52))
+        self.draw_scope_header(bounds)
+
+        if not monitor_items:
+            self.render_text(
+                "No monitor points selected.",
+                x_pos + 18,
+                y_pos + height - 62,
+            )
+            return
+
+        max_cycles = self.max_recorded_cycles(monitor_items)
+        if max_cycles == 0:
+            self.render_text(
+                "Press Run to record signal traces.",
+                x_pos + 18,
+                y_pos + height - 62,
+            )
+
+        label_width = self.calculate_scope_label_width(monitor_items)
+        plot_x = x_pos + label_width
+        plot_y = y_pos + 36
+        plot_width = width - label_width - 22
+        plot_height = height - 86
+        cycle_count = max(max_cycles, 10)
+        self.cycle_width = max(16, min(32, plot_width / cycle_count))
+
+        self.draw_scope_grid(
+            plot_x, plot_y, plot_width, plot_height, cycle_count
+        )
+        self.draw_scope_rows(
+            x_pos, plot_x, plot_y, plot_height, monitor_items
+        )
+        self.draw_scope_axis(plot_x, plot_y, cycle_count)
+
+    def draw_scope_header(self, bounds):
+        """Draw the oscilloscope title strip."""
+        x_pos, y_pos, width, height = bounds
+        header_bounds = (x_pos, y_pos + height - 34, width, 34)
+        self.draw_rectangle(header_bounds, (0.82, 0.86, 0.91),
+                            (0.48, 0.48, 0.52))
+        self.render_text("Oscilloscope", x_pos + 12, y_pos + height - 22)
+        self.draw_rectangle((x_pos + width - 50, y_pos + height - 23, 10, 10),
+                            (0.98, 0.38, 0.34), (0.50, 0.18, 0.18))
+        self.draw_rectangle((x_pos + width - 32, y_pos + height - 23, 10, 10),
+                            (0.98, 0.82, 0.26), (0.55, 0.42, 0.15))
+        self.draw_rectangle((x_pos + width - 14, y_pos + height - 23, 10, 10),
+                            (0.42, 0.74, 0.36), (0.20, 0.40, 0.18))
+
+    def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
+        """Draw oscilloscope grid lines."""
+        GL.glBegin(GL.GL_LINES)
+        for cycle in range(cycle_count + 1):
+            if cycle % 5 == 0:
+                self.set_colour(0.70, 0.70, 0.74)
+            else:
+                self.set_colour(0.86, 0.86, 0.88)
+            x_pos = plot_x + cycle * self.cycle_width
+            GL.glVertex2f(x_pos, plot_y)
+            GL.glVertex2f(x_pos, plot_y + height)
+
+        for row in range(0, int(height), 24):
+            self.set_colour(0.90, 0.90, 0.91)
+            GL.glVertex2f(plot_x, plot_y + row)
+            GL.glVertex2f(plot_x + width, plot_y + row)
+        GL.glEnd()
+
+    def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+                        monitor_items):
+        """Draw all monitored signal names and waveforms."""
+        row_gap = min(
+            self.row_height, plot_height / max(len(monitor_items), 1)
+        )
+        for index, monitor_item in enumerate(monitor_items):
+            (device_id, output_id), signal_list = monitor_item
+            name = self.devices.get_signal_name(device_id, output_id)
+            row_mid = plot_y + plot_height - 18 - index * row_gap
+            row_base = row_mid - self.high_offset / 2
+
+            colour = self.trace_colours[index % len(self.trace_colours)]
+            self.set_colour(*colour)
+            self.render_text(name, label_x + 14, row_mid - 5, colour)
+            self.draw_digital_signal(plot_x, row_base, signal_list, colour)
+
+    def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
+        """Draw one digital signal as a stepped waveform."""
+        high_y = row_base + self.high_offset
+        low_y = row_base + self.low_offset
+
+        for index, signal in enumerate(signal_list):
+            x_start = plot_x + index * self.cycle_width
+            x_end = x_start + self.cycle_width
+            x_mid = (x_start + x_end) / 2
+
+            if signal == self.devices.BLANK:
+                self.draw_blank_signal(x_start, x_end, row_base)
+                continue
+
+            self.set_colour(*colour)
+            GL.glLineWidth(2.0)
+            GL.glBegin(GL.GL_LINE_STRIP)
+            if signal == self.devices.HIGH:
+                GL.glVertex2f(x_start, high_y)
+                GL.glVertex2f(x_end, high_y)
+            elif signal == self.devices.LOW:
+                GL.glVertex2f(x_start, low_y)
+                GL.glVertex2f(x_end, low_y)
+            elif signal == self.devices.RISING:
+                GL.glVertex2f(x_start, low_y)
+                GL.glVertex2f(x_mid, low_y)
+                GL.glVertex2f(x_mid, high_y)
+                GL.glVertex2f(x_end, high_y)
+            elif signal == self.devices.FALLING:
+                GL.glVertex2f(x_start, high_y)
+                GL.glVertex2f(x_mid, high_y)
+                GL.glVertex2f(x_mid, low_y)
+                GL.glVertex2f(x_end, low_y)
+            GL.glEnd()
+            GL.glLineWidth(1.0)
+
+    def draw_blank_signal(self, x_start, x_end, row_base):
+        """Draw a blank signal interval for monitors added mid-run."""
+        mid_y = row_base + (self.high_offset + self.low_offset) / 2
+        dash_width = 5
+        self.set_colour(0.70, 0.70, 0.70)
+        GL.glBegin(GL.GL_LINES)
+        while x_start < x_end:
+            GL.glVertex2f(x_start, mid_y)
+            GL.glVertex2f(min(x_start + dash_width, x_end), mid_y)
+            x_start += dash_width * 2
+        GL.glEnd()
+
+    def draw_scope_axis(self, plot_x, plot_y, cycle_count):
+        """Draw cycle tick labels along the bottom of the scope."""
+        self.set_colour(0.22, 0.22, 0.24)
+        GL.glBegin(GL.GL_LINES)
+        GL.glVertex2f(plot_x, plot_y)
+        GL.glVertex2f(plot_x + cycle_count * self.cycle_width, plot_y)
+        GL.glEnd()
+
+        for cycle in range(cycle_count + 1):
+            if cycle % 5 != 0:
+                continue
+            x_pos = plot_x + cycle * self.cycle_width
+            GL.glBegin(GL.GL_LINES)
+            GL.glVertex2f(x_pos, plot_y)
+            GL.glVertex2f(x_pos, plot_y - 6)
+            GL.glEnd()
+            self.render_text(str(cycle), x_pos - 5, plot_y - 20)
+
+        self.render_text("Cycles", plot_x, plot_y - 34)
+
+    def max_recorded_cycles(self, monitor_items):
+        """Return the longest recorded monitor trace."""
         max_cycles = 0
         for _, signal_list in monitor_items:
             max_cycles = max(max_cycles, len(signal_list))
+        return max_cycles
 
-        y_pos = self.get_axis_y(len(monitor_items))
-        self.set_colour(0.15, 0.15, 0.15)
-        self.render_text("cycle", 10, y_pos - 4)
-
-        GL.glBegin(GL.GL_LINES)
-        GL.glVertex2f(self.left_margin, y_pos)
-        GL.glVertex2f(self.left_margin + max_cycles * self.cycle_width, y_pos)
-        GL.glEnd()
-
-        for cycle in range(max_cycles + 1):
-            x_pos = self.left_margin + cycle * self.cycle_width
-            GL.glBegin(GL.GL_LINES)
-            GL.glVertex2f(x_pos, y_pos - 4)
-            GL.glVertex2f(x_pos, y_pos + 4)
-            GL.glEnd()
-            if cycle % 5 == 0:
-                self.render_text(str(cycle), x_pos - 4, y_pos + 10)
-
-    def calculate_left_margin(self, monitor_items):
-        """Return enough left margin to fit the longest monitor name."""
+    def calculate_scope_label_width(self, monitor_items):
+        """Return enough left margin to fit monitor labels."""
         longest_name = 0
         for (device_id, output_id), _ in monitor_items:
             monitor_name = self.devices.get_signal_name(device_id, output_id)
             longest_name = max(longest_name, len(str(monitor_name)))
-        return max(150, 20 + longest_name * 9)
+        return max(116, 28 + longest_name * 8)
 
-    def draw_monitor_trace(self, row_index, monitor_item):
-        """Draw one monitor name and its waveform."""
-        (device_id, output_id), signal_list = monitor_item
-        monitor_name = self.devices.get_signal_name(device_id, output_id)
-        row_base = self.get_row_base(row_index)
+    def sorted_port_ids(self, port_dictionary):
+        """Return port IDs ordered by their display names."""
+        return sorted(port_dictionary, key=self.port_sort_name)
 
-        self.set_colour(0.0, 0.0, 0.0)
-        self.render_text(monitor_name, 10, row_base + 14)
+    def port_sort_name(self, port_id):
+        """Return a stable display name for sorting port IDs."""
+        if port_id is None:
+            return ""
+        return str(self.devices.names.get_name_string(port_id))
 
-        self.draw_row_guides(row_base, len(signal_list))
-
-        for index, signal in enumerate(signal_list):
-            x_start = self.left_margin + index * self.cycle_width
-            x_end = x_start + self.cycle_width
-            self.draw_signal_segment(signal, x_start, x_end, row_base)
-
-    def draw_row_guides(self, row_base, cycles):
-        """Draw faint high and low guide lines for a waveform row."""
-        x_start = self.left_margin
-        x_end = self.left_margin + max(cycles, 1) * self.cycle_width
-        self.set_colour(0.88, 0.88, 0.88)
-        GL.glBegin(GL.GL_LINES)
-        GL.glVertex2f(x_start, row_base + self.high_offset)
-        GL.glVertex2f(x_end, row_base + self.high_offset)
-        GL.glVertex2f(x_start, row_base + self.low_offset)
-        GL.glVertex2f(x_end, row_base + self.low_offset)
+    def draw_rectangle(self, bounds, fill_colour, border_colour=None):
+        """Draw a filled rectangle with an optional border."""
+        x_pos, y_pos, width, height = bounds
+        self.set_colour(*fill_colour)
+        GL.glBegin(GL.GL_QUADS)
+        GL.glVertex2f(x_pos, y_pos)
+        GL.glVertex2f(x_pos + width, y_pos)
+        GL.glVertex2f(x_pos + width, y_pos + height)
+        GL.glVertex2f(x_pos, y_pos + height)
         GL.glEnd()
 
-    def draw_signal_segment(self, signal, x_start, x_end, row_base):
-        """Draw one cycle of a signal trace."""
-        high_y = row_base + self.high_offset
-        low_y = row_base + self.low_offset
+        if border_colour is not None:
+            self.set_colour(*border_colour)
+            GL.glBegin(GL.GL_LINE_LOOP)
+            GL.glVertex2f(x_pos, y_pos)
+            GL.glVertex2f(x_pos + width, y_pos)
+            GL.glVertex2f(x_pos + width, y_pos + height)
+            GL.glVertex2f(x_pos, y_pos + height)
+            GL.glEnd()
 
-        if signal == self.devices.BLANK:
-            self.set_colour(0.72, 0.72, 0.72)
-            self.draw_dashed_blank(x_start, x_end, row_base)
-            return
-
-        self.set_colour(0.0, 0.18, 0.75)
-        GL.glLineWidth(2.0)
-        GL.glBegin(GL.GL_LINES)
-        if signal == self.devices.HIGH:
-            GL.glVertex2f(x_start, high_y)
-            GL.glVertex2f(x_end, high_y)
-        elif signal == self.devices.LOW:
-            GL.glVertex2f(x_start, low_y)
-            GL.glVertex2f(x_end, low_y)
-        elif signal == self.devices.RISING:
-            GL.glVertex2f(x_start, low_y)
-            GL.glVertex2f(x_end, high_y)
-        elif signal == self.devices.FALLING:
-            GL.glVertex2f(x_start, high_y)
-            GL.glVertex2f(x_end, low_y)
+    def draw_circle(self, x_pos, y_pos, radius, fill_colour):
+        """Draw a filled circular marker."""
+        self.set_colour(*fill_colour)
+        GL.glBegin(GL.GL_TRIANGLE_FAN)
+        GL.glVertex2f(x_pos, y_pos)
+        for index in range(25):
+            angle = 2 * 3.141592653589793 * index / 24
+            GL.glVertex2f(
+                x_pos + radius * math.cos(angle),
+                y_pos + radius * math.sin(angle),
+            )
         GL.glEnd()
-        GL.glLineWidth(1.0)
-
-    def draw_dashed_blank(self, x_start, x_end, row_base):
-        """Draw a blank signal interval for monitors added mid-run."""
-        mid_y = row_base + (self.high_offset + self.low_offset) / 2
-        dash_width = 6
-        x_pos = x_start
-        GL.glBegin(GL.GL_LINES)
-        while x_pos < x_end:
-            GL.glVertex2f(x_pos, mid_y)
-            GL.glVertex2f(min(x_pos + dash_width, x_end), mid_y)
-            x_pos += dash_width * 2
+        self.set_colour(0.24, 0.24, 0.24)
+        GL.glBegin(GL.GL_LINE_LOOP)
+        for index in range(24):
+            angle = 2 * 3.141592653589793 * index / 24
+            GL.glVertex2f(
+                x_pos + radius * math.cos(angle),
+                y_pos + radius * math.sin(angle),
+            )
         GL.glEnd()
 
-    def get_axis_y(self, number_of_rows):
-        """Return y position for the time axis."""
-        return self.get_row_base(number_of_rows - 1) + self.row_height
+    def set_signal_colour(self, signal):
+        """Set colour for circuit wires according to signal level."""
+        self.set_colour(*self.signal_colour(signal))
 
-    def get_row_base(self, row_index):
-        """Return base y position for a row."""
-        return 32 + row_index * self.row_height
+    def signal_colour(self, signal):
+        """Return colour for a signal level."""
+        if signal in [self.devices.HIGH, self.devices.RISING]:
+            return (0.86, 0.08, 0.08)
+        if signal in [self.devices.LOW, self.devices.FALLING]:
+            return (0.28, 0.28, 0.30)
+        return (0.70, 0.70, 0.70)
 
     def on_paint(self, event):
         """Handle repaint requests."""
@@ -256,9 +604,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.init = False
             self.Refresh()
 
-    def render_text(self, text, x_pos, y_pos):
+    def render_text(self, text, x_pos, y_pos, colour=(0.0, 0.0, 0.0)):
         """Draw bitmap text at the given position."""
-        self.set_colour(0.0, 0.0, 0.0)
+        self.set_colour(*colour)
         GL.glRasterPos2f(x_pos, y_pos)
         font = GLUT.GLUT_BITMAP_HELVETICA_12
 
