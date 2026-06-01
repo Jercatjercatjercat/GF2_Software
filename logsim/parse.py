@@ -81,14 +81,31 @@ class Parser:
         self.expect_symbol(self.scanner.LEFT_BRACE,
                            "expected '{' after DEVICES")
 
-        if self.symbol.type != self.scanner.NAME:
+        device_count = 0
+        while self.symbol.type not in [self.scanner.RIGHT_BRACE,
+                                       self.scanner.EOF]:
+            if self.symbol.type == self.scanner.NAME:
+                self.parse_device_decl()
+                device_count += 1
+            elif self.symbol.type == self.scanner.NUMBER:
+                self.report_syntax_error(
+                    "device name must start with a letter"
+                )
+                self.recover_to([self.scanner.SEMICOLON,
+                                 self.scanner.RIGHT_BRACE])
+                if self.symbol.type == self.scanner.SEMICOLON:
+                    self.advance()
+            else:
+                self.report_syntax_error("expected device declaration")
+                self.recover_to([self.scanner.SEMICOLON,
+                                 self.scanner.RIGHT_BRACE])
+                if self.symbol.type == self.scanner.SEMICOLON:
+                    self.advance()
+
+        if device_count == 0:
             self.report_syntax_error(
                 "expected at least one device declaration"
             )
-        else:
-            self.parse_device_decl()
-            while self.symbol.type == self.scanner.NAME:
-                self.parse_device_decl()
 
         self.expect_symbol(self.scanner.RIGHT_BRACE,
                            "expected '}' after devices")
@@ -252,9 +269,27 @@ class Parser:
         if self.symbol.type == self.scanner.NAME:
             self.parse_monitor_signal()
 
-            while self.symbol.type == self.scanner.COMMA:
-                self.advance()
-                self.parse_monitor_signal()
+            while self.symbol.type not in [self.scanner.RIGHT_BRACE,
+                                           self.scanner.EOF]:
+                if self.symbol.type == self.scanner.COMMA:
+                    self.advance()
+                    if self.symbol.type == self.scanner.RIGHT_BRACE:
+                        self.report_syntax_error(
+                            "expected monitor signal after ','"
+                        )
+                    else:
+                        self.parse_monitor_signal()
+                elif self.symbol.type == self.scanner.NAME:
+                    self.report_syntax_error(
+                        "expected ',' or '}' after monitor signal"
+                    )
+                    self.parse_monitor_signal()
+                else:
+                    self.report_syntax_error(
+                        "expected ',' or '}' after monitor signal"
+                    )
+                    self.recover_to([self.scanner.COMMA,
+                                     self.scanner.RIGHT_BRACE])
 
         self.expect_symbol(self.scanner.RIGHT_BRACE,
                            "expected '}' after monitors")

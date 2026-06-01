@@ -394,3 +394,56 @@ def test_parse_rejects_monitor_placed_on_non_output_signal(tmp_path):
     )
 
     assert not parser.parse_network()
+
+def test_parse_reports_numeric_device_name_without_section_cascade(
+        tmp_path, capsys):
+    """Test recovery when a device name starts with a number."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            CLK1 : CLOCK(4);
+            123A : SWITCH(0);
+            CLEAR_SW : SWITCH(0);
+            FF_SWITCH : DTYPE;
+        }
+        CONNECT {
+            CLK1 -> FF_SWITCH.CLK;
+            SET_SW -> FF_SWITCH.SET;
+            CLEAR_SW -> FF_SWITCH.CLEAR;
+        }
+        MONITOR { CLK1, SET_SW, CLEAR_SW, FF_SWITCH.Q };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "device name must start with a letter" in output
+    assert "expected CONNECT" not in output
+    assert "expected MONITOR" not in output
+
+
+def test_parse_reports_missing_comma_in_monitor_list(tmp_path, capsys):
+    """Test recovery from a missing comma between monitor signals."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+            SW2 : SWITCH(1);
+        }
+        CONNECT {
+        }
+        MONITOR {
+            SW1
+            SW2
+        };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "expected ',' or '}' after monitor signal" in output
+    assert "expected END" not in output
+    assert "expected end of file after END" not in output
+
