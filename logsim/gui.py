@@ -79,7 +79,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         size = self.GetClientSize()
         self.SetCurrent(self.context)
         GL.glDrawBuffer(GL.GL_BACK)
-        GL.glClearColor(1.0, 1.0, 1.0, 0.0)
+        GL.glClearColor(0.96, 0.97, 0.98, 0.0)
         GL.glViewport(0, 0, size.width, size.height)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
@@ -101,12 +101,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        circuit_bounds = (18, size.height - 218, size.width - 36, 190)
-        scope_bounds = (18, 28, size.width - 36, size.height - 270)
+        circuit_bounds = (18, size.height - 238, size.width - 36, 212)
+        scope_bounds = (18, 28, size.width - 36, size.height - 292)
 
         if scope_bounds[3] < 240:
             scope_bounds = (18, 28, size.width - 36, 240)
-            circuit_bounds = (18, 290, size.width - 36, 190)
+            circuit_bounds = (18, 290, size.width - 36, 212)
 
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
@@ -120,7 +120,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def draw_canvas_grid(self, size):
         """Draw a faint simulator-style workspace grid."""
-        self.set_colour(0.94, 0.94, 0.90)
+        self.set_colour(0.90, 0.92, 0.94)
         GL.glBegin(GL.GL_LINES)
         for x_pos in range(0, size.width + 1, 24):
             GL.glVertex2f(x_pos, 0)
@@ -154,8 +154,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         max_layer = max(layer_groups) if layer_groups else 0
         positions = {}
-        block_width = 92
-        block_height = 34
+        longest_name = max(
+            len(str(self.devices.names.get_name_string(device.device_id)))
+            for device in self.devices.devices_list
+        )
+        block_width = min(148, max(112, longest_name * 8 + 24))
+        block_height = 36
         usable_width = max(width - block_width - 90, 1)
 
         for layer, devices_in_layer in layer_groups.items():
@@ -165,13 +169,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 node_x = x_pos + 48 + layer * usable_width / max_layer
 
             count = len(devices_in_layer)
-            available_height = max(height - 58, 1)
+            available_height = max(height - 62, 1)
             for index, device in enumerate(devices_in_layer):
                 if count == 1:
                     node_y = y_pos + height / 2 - block_height / 2 - 4
                 else:
                     gap = available_height / (count - 1)
-                    node_y = y_pos + height - 58 - index * gap
+                    node_y = y_pos + height - 64 - index * gap
                 positions[device.device_id] = (
                     node_x, node_y, block_width, block_height
                 )
@@ -274,9 +278,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         name = self.devices.names.get_name_string(device.device_id)
         fill_colour = self.device_fill_colour(device)
 
-        self.draw_rectangle(bounds, fill_colour, (0.30, 0.30, 0.32))
-        self.render_text(str(name), x_pos + 7, y_pos + height - 15)
-        self.render_text(str(kind), x_pos + 7, y_pos + 10)
+        max_chars = max(6, int(width / 8) - 1)
+        display_name = self.truncate_label(str(name), max_chars)
+        display_kind = self.truncate_label(str(kind), max_chars)
+
+        self.draw_rectangle(bounds, fill_colour, (0.38, 0.42, 0.48))
+        self.render_text(display_name, x_pos + 8, y_pos + height - 14)
+        self.render_text(
+            display_kind, x_pos + 8, y_pos + 8, (0.34, 0.39, 0.47)
+        )
 
         for input_id in self.sorted_port_ids(device.inputs):
             pin_x, pin_y = self.input_pin(bounds, device, input_id)
@@ -367,6 +377,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 scope_x + 20,
                 scope_y + scope_height - 78,
             )
+            self.draw_empty_scope_labels(scope_x, scope_y, monitor_items)
+            return
 
         label_width = self.calculate_scope_label_width(monitor_items)
         title_height = 28
@@ -493,6 +505,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 first_cycle:first_cycle + cycle_count
             ]
             self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
+
+    def draw_empty_scope_labels(self, scope_x, scope_y, monitor_items):
+        """Show monitored signal names neatly before any run."""
+        max_rows = 8
+        for index, monitor_item in enumerate(monitor_items[:max_rows]):
+            (device_id, output_id), _ = monitor_item
+            name = self.devices.get_signal_name(device_id, output_id)
+            colour = self.trace_colour_for_monitor(
+                device_id, output_id, index
+            )
+            self.render_text(
+                self.truncate_label(name, 18),
+                scope_x + 22,
+                scope_y + 156 - index * 20,
+                colour,
+            )
+
+        if len(monitor_items) > max_rows:
+            self.render_text(
+                "+" + str(len(monitor_items) - max_rows) + " more",
+                scope_x + 22,
+                scope_y + 156 - max_rows * 20,
+                (0.36, 0.40, 0.46),
+            )
 
     def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
         """Draw one digital signal as a continuous square waveform."""
@@ -649,6 +685,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return ""
         return str(self.devices.names.get_name_string(port_id))
 
+    def truncate_label(self, label, max_chars):
+        """Return a shortened label that fits compact graphics."""
+        if label is None:
+            return ""
+        label = str(label)
+        if len(label) <= max_chars:
+            return label
+        return label[:max_chars - 1] + "."
+
     def draw_rectangle(self, bounds, fill_colour, border_colour=None):
         """Draw a filled rectangle with an optional border."""
         x_pos, y_pos, width, height = bounds
@@ -774,6 +819,7 @@ class Gui(wx.Frame):
     def __init__(self, title, path, names, devices, network, monitors):
         """Initialise widgets, controller, and layout."""
         super().__init__(parent=None, title=title, size=(1000, 700))
+        self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
         self.controller = GuiController(names, devices, network, monitors)
@@ -822,6 +868,8 @@ class Gui(wx.Frame):
         self.speed_slider = wx.Slider(
             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
         )
+        self.open_button = wx.Button(self, wx.ID_ANY, "Open File")
+        self.help_button = wx.Button(self, wx.ID_ANY, "Help")
         self.status_label = wx.StaticText(self, wx.ID_ANY, "")
         self.status_label.Wrap(230)
 
@@ -855,25 +903,39 @@ class Gui(wx.Frame):
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
+        root_sizer = wx.BoxSizer(wx.VERTICAL)
+        toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        run_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Simulation"),
-                                    wx.VERTICAL)
         switch_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Switches"),
                                        wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Monitors"),
                                         wx.VERTICAL)
+        status_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Status"),
+                                       wx.VERTICAL)
 
-        run_box.Add(self.cycles_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
-        run_box.Add(self.cycles_spin, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.run_button, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.continue_button, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.step_button, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.auto_run_button, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.speed_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 6)
-        run_box.Add(self.speed_slider, 0, wx.EXPAND | wx.ALL, 6)
-        run_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
+        toolbar_sizer.Add(self.cycles_label, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
+        toolbar_sizer.Add(self.cycles_spin, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        toolbar_sizer.Add(self.run_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        toolbar_sizer.Add(self.continue_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        toolbar_sizer.Add(self.step_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        toolbar_sizer.Add(self.auto_run_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        toolbar_sizer.Add(self.speed_label, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        toolbar_sizer.Add(self.speed_slider, 1,
+                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 6)
+        toolbar_sizer.AddStretchSpacer()
+        toolbar_sizer.Add(self.open_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.help_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
@@ -891,14 +953,17 @@ class Gui(wx.Frame):
         monitor_box.Add(self.remove_monitor_button, 0,
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
+        status_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
 
-        side_sizer.Add(run_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(status_box, 0, wx.EXPAND | wx.ALL, 6)
 
         main_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        self.SetSizer(main_sizer)
+        root_sizer.Add(toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        root_sizer.Add(main_sizer, 1, wx.EXPAND)
+        self.SetSizer(root_sizer)
 
     def bind_events(self):
         """Bind widget events to handlers."""
@@ -911,6 +976,8 @@ class Gui(wx.Frame):
         self.auto_run_button.Bind(wx.EVT_TOGGLEBUTTON,
                                   self.on_auto_run_button)
         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
+        self.open_button.Bind(wx.EVT_BUTTON, lambda event: self.on_open_file())
+        self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
         self.remove_monitor_button.Bind(
