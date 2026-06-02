@@ -324,16 +324,33 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return y_pos + height - 6 - index * usable_height / (count - 1)
 
     def draw_oscilloscope(self, bounds, monitor_items):
-        """Draw monitor signals as an oscilloscope-style panel."""
+        """Draw monitor signals in a floating oscilloscope window."""
         x_pos, y_pos, width, height = bounds
-        self.draw_rectangle(bounds, (0.96, 0.96, 0.96), (0.48, 0.48, 0.52))
-        self.draw_scope_header(bounds)
+
+        margin_x = 34 if width > 520 else 8
+        scope_bounds = (
+            x_pos + margin_x,
+            y_pos + 8,
+            width - 2 * margin_x,
+            height - 16,
+        )
+        scope_x, scope_y, scope_width, scope_height = scope_bounds
+
+        self.draw_rectangle(
+            (scope_x + 7, scope_y - 7, scope_width, scope_height),
+            (0.42, 0.42, 0.42),
+        )
+        self.draw_rectangle(
+            scope_bounds, (0.78, 0.78, 0.78), (0.36, 0.36, 0.38)
+        )
+        self.draw_scope_header(scope_bounds)
+        self.draw_scope_controls(scope_bounds)
 
         if not monitor_items:
             self.render_text(
                 "No monitor points selected.",
-                x_pos + 18,
-                y_pos + height - 62,
+                scope_x + 20,
+                scope_y + scope_height - 78,
             )
             return
 
@@ -341,39 +358,95 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if max_cycles == 0:
             self.render_text(
                 "Press Run to record signal traces.",
-                x_pos + 18,
-                y_pos + height - 62,
+                scope_x + 20,
+                scope_y + scope_height - 78,
             )
 
         label_width = self.calculate_scope_label_width(monitor_items)
-        plot_x = x_pos + label_width
-        plot_y = y_pos + 36
-        plot_width = width - label_width - 22
-        plot_height = height - 86
-        cycle_count = max(max_cycles, 10)
-        self.cycle_width = max(16, min(32, plot_width / cycle_count))
+        title_height = 28
+        control_height = 42
+        axis_height = 54
+        scroll_width = 14
+
+        plot_x = scope_x + label_width
+        plot_y = scope_y + axis_height
+        plot_width = scope_width - label_width - scroll_width - 20
+        control_y = scope_y + scope_height - title_height - control_height
+        plot_height = control_y - plot_y - 8
+
+        max_visible_cycles = max(10, int(plot_width // 13))
+        if max_cycles > max_visible_cycles:
+            first_cycle = max_cycles - max_visible_cycles
+            cycle_count = max_visible_cycles
+        else:
+            first_cycle = 0
+            cycle_count = max(max_cycles, 10)
+        self.cycle_width = plot_width / max(cycle_count, 1)
 
         self.draw_scope_grid(
             plot_x, plot_y, plot_width, plot_height, cycle_count
         )
-        self.draw_scope_rows(
-            x_pos, plot_x, plot_y, plot_height, monitor_items
+        self.draw_scope_scrollbars(
+            scope_bounds, plot_x, plot_y, plot_width, plot_height,
+            first_cycle, max_cycles, cycle_count
         )
-        self.draw_scope_axis(plot_x, plot_y, cycle_count)
+        self.draw_scope_rows(
+            scope_x, plot_x, plot_y, plot_height, monitor_items,
+            first_cycle, cycle_count
+        )
+        self.draw_scope_axis(plot_x, plot_y, cycle_count, first_cycle)
 
     def draw_scope_header(self, bounds):
         """Draw the oscilloscope title strip."""
         x_pos, y_pos, width, height = bounds
-        header_bounds = (x_pos, y_pos + height - 34, width, 34)
-        self.draw_rectangle(header_bounds, (0.82, 0.86, 0.91),
+        header_bounds = (x_pos, y_pos + height - 28, width, 28)
+        self.draw_rectangle(header_bounds, (0.70, 0.80, 0.91),
                             (0.48, 0.48, 0.52))
-        self.render_text("Oscilloscope", x_pos + 12, y_pos + height - 22)
-        self.draw_rectangle((x_pos + width - 50, y_pos + height - 23, 10, 10),
-                            (0.98, 0.38, 0.34), (0.50, 0.18, 0.18))
-        self.draw_rectangle((x_pos + width - 32, y_pos + height - 23, 10, 10),
-                            (0.98, 0.82, 0.26), (0.55, 0.42, 0.15))
-        self.draw_rectangle((x_pos + width - 14, y_pos + height - 23, 10, 10),
-                            (0.42, 0.74, 0.36), (0.20, 0.40, 0.18))
+        self.render_text("Oscilloscope", x_pos + 30, y_pos + height - 18)
+        self.draw_rectangle(
+            (x_pos + 9, y_pos + height - 21, 12, 12),
+            (0.82, 0.90, 0.98), (0.35, 0.48, 0.64)
+        )
+
+        button_y = y_pos + height - 21
+        self.draw_window_button(x_pos + width - 55, button_y, "_")
+        self.draw_window_button(x_pos + width - 37, button_y, "[]")
+        self.draw_window_button(x_pos + width - 19, button_y, "x")
+
+    def draw_scope_controls(self, bounds):
+        """Draw toolbar buttons and top slider inside the scope."""
+        x_pos, y_pos, width, height = bounds
+        controls_y = y_pos + height - 70
+
+        self.draw_toolbar_button(x_pos + 12, controls_y + 12, "||")
+        self.draw_toolbar_button(x_pos + 39, controls_y + 12, "+")
+
+        slider_x = x_pos + 110
+        slider_y = controls_y + 24
+        slider_width = width - 190
+        self.set_colour(0.88, 0.88, 0.88)
+        GL.glBegin(GL.GL_LINES)
+        GL.glVertex2f(slider_x, slider_y)
+        GL.glVertex2f(slider_x + slider_width, slider_y)
+        GL.glEnd()
+        self.draw_rectangle(
+            (slider_x + slider_width * 0.50 - 4, slider_y - 10, 8, 20),
+            (0.74, 0.88, 0.94), (0.42, 0.58, 0.66)
+        )
+
+    def draw_window_button(self, x_pos, y_pos, label):
+        """Draw a small title-bar window button."""
+        self.draw_rectangle(
+            (x_pos, y_pos, 13, 12), (0.86, 0.89, 0.93), (0.45, 0.48, 0.52)
+        )
+        self.render_text(label, x_pos + 3, y_pos + 2, (0.18, 0.20, 0.22))
+
+    def draw_toolbar_button(self, x_pos, y_pos, label):
+        """Draw a small oscilloscope toolbar button."""
+        self.draw_rectangle(
+            (x_pos, y_pos, 20, 22), (0.88, 0.92, 0.96), (0.52, 0.56, 0.62)
+        )
+        self.render_text(label, x_pos + 5, y_pos + 7, (0.20, 0.34, 0.60))
 
     def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
         """Draw oscilloscope grid lines."""
@@ -394,7 +467,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
 
     def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
-                        monitor_items):
+                        monitor_items, first_cycle, cycle_count):
         """Draw all monitored signal names and waveforms."""
         row_gap = min(
             self.row_height, plot_height / max(len(monitor_items), 1)
@@ -408,7 +481,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             colour = self.trace_colours[index % len(self.trace_colours)]
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
-            self.draw_digital_signal(plot_x, row_base, signal_list, colour)
+            visible_signals = signal_list[
+                first_cycle:first_cycle + cycle_count
+            ]
+            self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
 
     def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
         """Draw one digital signal as a stepped waveform."""
@@ -458,7 +534,55 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             x_start += dash_width * 2
         GL.glEnd()
 
-    def draw_scope_axis(self, plot_x, plot_y, cycle_count):
+    def draw_scope_scrollbars(self, bounds, plot_x, plot_y, plot_width,
+                              plot_height, first_cycle, max_cycles,
+                              cycle_count):
+        """Draw decorative scrollbars like a scope display."""
+        x_pos, y_pos, width, _ = bounds
+        right_x = plot_x + plot_width + 6
+
+        self.draw_rectangle(
+            (right_x, plot_y, 10, plot_height), (0.88, 0.88, 0.88),
+            (0.62, 0.62, 0.64)
+        )
+        thumb_height = max(28, plot_height * 0.28)
+        self.draw_rectangle(
+            (right_x + 1, plot_y + plot_height * 0.48, 8, thumb_height),
+            (0.72, 0.72, 0.74), (0.48, 0.48, 0.50)
+        )
+
+        bar_y = y_pos + 22
+        bar_x = plot_x
+        bar_width = plot_width
+        self.draw_rectangle(
+            (bar_x, bar_y, bar_width, 13), (0.88, 0.88, 0.88),
+            (0.62, 0.62, 0.64)
+        )
+        self.draw_rectangle(
+            (bar_x - 12, bar_y, 12, 13), (0.86, 0.86, 0.86),
+            (0.62, 0.62, 0.64)
+        )
+        self.draw_rectangle(
+            (bar_x + bar_width, bar_y, 12, 13), (0.86, 0.86, 0.86),
+            (0.62, 0.62, 0.64)
+        )
+
+        if max_cycles > cycle_count:
+            fraction = first_cycle / max(max_cycles - cycle_count, 1)
+            thumb_width = max(44, bar_width * cycle_count / max_cycles)
+            thumb_x = bar_x + fraction * (bar_width - thumb_width)
+        else:
+            thumb_width = max(44, bar_width * 0.55)
+            thumb_x = bar_x + (bar_width - thumb_width) / 2
+        self.draw_rectangle(
+            (thumb_x, bar_y + 2, thumb_width, 9), (0.72, 0.72, 0.74),
+            (0.48, 0.48, 0.50)
+        )
+        self.render_text("<", bar_x - 9, bar_y + 2, (0.26, 0.26, 0.28))
+        self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
+                         (0.26, 0.26, 0.28))
+
+    def draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle):
         """Draw cycle tick labels along the bottom of the scope."""
         self.set_colour(0.22, 0.22, 0.24)
         GL.glBegin(GL.GL_LINES)
@@ -474,7 +598,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(x_pos, plot_y)
             GL.glVertex2f(x_pos, plot_y - 6)
             GL.glEnd()
-            self.render_text(str(cycle), x_pos - 5, plot_y - 20)
+            self.render_text(str(first_cycle + cycle), x_pos - 5, plot_y - 20)
 
         self.render_text("Cycles", plot_x, plot_y - 34)
 
