@@ -63,6 +63,21 @@ def test_continue_appends_trace_after_run(controller):
     )]) == 5
 
 
+def test_step_simulation_cold_starts_then_advances(controller):
+    """Test if stepping works before and after an initial run."""
+    success, message = controller.step_simulation()
+
+    assert success
+    assert message == "Running for 1 cycles."
+    assert controller.cycles_completed == 1
+
+    success, message = controller.step_simulation()
+
+    assert success
+    assert message == "Advanced one cycle. Total: 2."
+    assert controller.cycles_completed == 2
+
+
 def test_set_switch_changes_switch_state(controller):
     """Test if a switch value can be changed by name."""
     success, message = controller.set_switch("SW1", 1)

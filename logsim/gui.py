@@ -11,6 +11,12 @@ import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLUT
 
+from names import Names
+from devices import Devices
+from network import Network
+from monitors import Monitors
+from scanner import Scanner
+from parse import Parser
 from gui_controller import GuiController
 
 
@@ -478,7 +484,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             row_mid = plot_y + plot_height - 18 - index * row_gap
             row_base = row_mid - self.high_offset / 2
 
-            colour = self.trace_colours[index % len(self.trace_colours)]
+            colour = self.trace_colour_for_monitor(
+                device_id, output_id, index
+            )
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             visible_signals = signal_list[
@@ -487,40 +495,54 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
 
     def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
-        """Draw one digital signal as a stepped waveform."""
+        """Draw one digital signal as a continuous square waveform."""
         high_y = row_base + self.high_offset
         low_y = row_base + self.low_offset
+        previous_y = None
 
         for index, signal in enumerate(signal_list):
             x_start = plot_x + index * self.cycle_width
             x_end = x_start + self.cycle_width
-            x_mid = (x_start + x_end) / 2
 
             if signal == self.devices.BLANK:
                 self.draw_blank_signal(x_start, x_end, row_base)
+                previous_y = None
+                continue
+
+            current_y = self.signal_y(signal, high_y, low_y)
+            if current_y is None:
                 continue
 
             self.set_colour(*colour)
             GL.glLineWidth(2.0)
             GL.glBegin(GL.GL_LINE_STRIP)
-            if signal == self.devices.HIGH:
-                GL.glVertex2f(x_start, high_y)
-                GL.glVertex2f(x_end, high_y)
-            elif signal == self.devices.LOW:
-                GL.glVertex2f(x_start, low_y)
-                GL.glVertex2f(x_end, low_y)
-            elif signal == self.devices.RISING:
-                GL.glVertex2f(x_start, low_y)
-                GL.glVertex2f(x_mid, low_y)
-                GL.glVertex2f(x_mid, high_y)
-                GL.glVertex2f(x_end, high_y)
-            elif signal == self.devices.FALLING:
-                GL.glVertex2f(x_start, high_y)
-                GL.glVertex2f(x_mid, high_y)
-                GL.glVertex2f(x_mid, low_y)
-                GL.glVertex2f(x_end, low_y)
+            if previous_y is None:
+                GL.glVertex2f(x_start, current_y)
+            else:
+                GL.glVertex2f(x_start, previous_y)
+                if previous_y != current_y:
+                    GL.glVertex2f(x_start, current_y)
+            GL.glVertex2f(x_end, current_y)
             GL.glEnd()
             GL.glLineWidth(1.0)
+            previous_y = current_y
+
+    def signal_y(self, signal, high_y, low_y):
+        """Map a simulator signal level to a stable y position."""
+        if signal in [self.devices.HIGH, self.devices.RISING]:
+            return high_y
+        if signal in [self.devices.LOW, self.devices.FALLING]:
+            return low_y
+        return None
+
+    def trace_colour_for_monitor(self, device_id, output_id, index):
+        """Return a trace colour, with clocks highlighted in green."""
+        device = self.devices.get_device(device_id)
+        if device is not None and device.device_kind == self.devices.CLOCK:
+            return (0.20, 0.55, 0.25)
+        if output_id == self.devices.QBAR_ID:
+            return (0.48, 0.30, 0.68)
+        return self.trace_colours[index % len(self.trace_colours)]
 
     def draw_blank_signal(self, x_start, x_end, row_base):
         """Draw a blank signal interval for monitors added mid-run."""
@@ -755,6 +777,7 @@ class Gui(wx.Frame):
 
         self.path = path
         self.controller = GuiController(names, devices, network, monitors)
+        self.auto_timer = wx.Timer(self)
 
         self.configure_menu()
         self.CreateStatusBar()
@@ -768,12 +791,21 @@ class Gui(wx.Frame):
         self.SetSizeHints(760, 520)
 
     def configure_menu(self):
-        """Create the File menu."""
+        """Create the File and Help menus."""
+        self.help_menu_id = wx.NewIdRef()
+
         file_menu = wx.Menu()
         menu_bar = wx.MenuBar()
-        file_menu.Append(wx.ID_ABOUT, "&About")
+        file_menu.Append(wx.ID_OPEN, "&Open definition file...")
+        file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "&Exit")
+
+        help_menu = wx.Menu()
+        help_menu.Append(self.help_menu_id, "&Help")
+        help_menu.Append(wx.ID_ABOUT, "&About")
+
         menu_bar.Append(file_menu, "&File")
+        menu_bar.Append(help_menu, "&Help")
         self.SetMenuBar(menu_bar)
 
     def create_controls(self):
@@ -784,6 +816,12 @@ class Gui(wx.Frame):
         )
         self.run_button = wx.Button(self, wx.ID_ANY, "Run")
         self.continue_button = wx.Button(self, wx.ID_ANY, "Continue")
+        self.step_button = wx.Button(self, wx.ID_ANY, "Step")
+        self.auto_run_button = wx.ToggleButton(self, wx.ID_ANY, "Auto Run")
+        self.speed_label = wx.StaticText(self, wx.ID_ANY, "Auto speed")
+        self.speed_slider = wx.Slider(
+            self, wx.ID_ANY, value=5, minValue=1, maxValue=10
+        )
         self.status_label = wx.StaticText(self, wx.ID_ANY, "")
         self.status_label.Wrap(230)
 
@@ -831,6 +869,10 @@ class Gui(wx.Frame):
         run_box.Add(self.cycles_spin, 0, wx.EXPAND | wx.ALL, 6)
         run_box.Add(self.run_button, 0, wx.EXPAND | wx.ALL, 6)
         run_box.Add(self.continue_button, 0, wx.EXPAND | wx.ALL, 6)
+        run_box.Add(self.step_button, 0, wx.EXPAND | wx.ALL, 6)
+        run_box.Add(self.auto_run_button, 0, wx.EXPAND | wx.ALL, 6)
+        run_box.Add(self.speed_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 6)
+        run_box.Add(self.speed_slider, 0, wx.EXPAND | wx.ALL, 6)
         run_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
 
         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
@@ -861,8 +903,14 @@ class Gui(wx.Frame):
     def bind_events(self):
         """Bind widget events to handlers."""
         self.Bind(wx.EVT_MENU, self.on_menu)
+        self.Bind(wx.EVT_TIMER, self.on_auto_timer, self.auto_timer)
+        self.Bind(wx.EVT_CLOSE, self.on_close)
         self.run_button.Bind(wx.EVT_BUTTON, self.on_run_button)
         self.continue_button.Bind(wx.EVT_BUTTON, self.on_continue_button)
+        self.step_button.Bind(wx.EVT_BUTTON, self.on_step_button)
+        self.auto_run_button.Bind(wx.EVT_TOGGLEBUTTON,
+                                  self.on_auto_run_button)
+        self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
         self.remove_monitor_button.Bind(
@@ -874,16 +922,23 @@ class Gui(wx.Frame):
         """Handle menu events."""
         event_id = event.GetId()
         if event_id == wx.ID_EXIT:
+            self.stop_auto_run()
             self.Close(True)
+        elif event_id == wx.ID_OPEN:
+            self.on_open_file()
+        elif event_id == int(self.help_menu_id):
+            self.on_help()
         elif event_id == wx.ID_ABOUT:
-            wx.MessageBox(
-                "GF2 Logic Simulator\nGraphical user interface",
-                "About Logsim",
-                wx.ICON_INFORMATION | wx.OK,
-            )
+            self.on_about()
+
+    def on_close(self, event):
+        """Stop background timers before closing the window."""
+        self.stop_auto_run()
+        event.Skip()
 
     def on_run_button(self, event):
         """Run the simulation from a cold start."""
+        self.stop_auto_run()
         success, message = self.controller.run_from_start(
             self.cycles_spin.GetValue()
         )
@@ -891,10 +946,54 @@ class Gui(wx.Frame):
 
     def on_continue_button(self, event):
         """Continue a previous simulation."""
+        self.stop_auto_run()
         success, message = self.controller.continue_simulation(
             self.cycles_spin.GetValue()
         )
         self.after_action(success, message)
+
+    def on_step_button(self, event):
+        """Run exactly one simulation cycle."""
+        self.stop_auto_run()
+        success, message = self.controller.step_simulation()
+        self.after_action(success, message)
+
+    def on_auto_run_button(self, event):
+        """Start or stop continuous simulation."""
+        if self.auto_run_button.GetValue():
+            self.auto_timer.Start(self.get_auto_delay())
+            self.set_status("Auto run started.")
+        else:
+            self.stop_auto_run()
+            self.set_status("Auto run stopped.")
+
+    def on_auto_timer(self, event):
+        """Advance one cycle whenever the auto-run timer fires."""
+        success, message = self.controller.step_simulation()
+        self.refresh_choices()
+        self.canvas.Refresh()
+        if success:
+            self.set_status(message)
+        else:
+            self.stop_auto_run()
+            self.set_status(message, error=True)
+
+    def on_speed_slider(self, event):
+        """Update the auto-run timer interval."""
+        if self.auto_timer.IsRunning():
+            self.auto_timer.Start(self.get_auto_delay())
+
+    def get_auto_delay(self):
+        """Return timer delay in milliseconds from the speed slider."""
+        speed = self.speed_slider.GetValue()
+        return max(50, 1050 - speed * 100)
+
+    def stop_auto_run(self):
+        """Stop continuous running if it is active."""
+        if self.auto_timer.IsRunning():
+            self.auto_timer.Stop()
+        if self.auto_run_button.GetValue():
+            self.auto_run_button.SetValue(False)
 
     def on_set_switch_button(self, event):
         """Set the selected switch to the selected value."""
@@ -932,6 +1031,71 @@ class Gui(wx.Frame):
         """Reset canvas pan and zoom."""
         self.canvas.reset_view()
         self.set_status("View reset.")
+
+    def on_open_file(self):
+        """Load and parse a new definition file selected by the user."""
+        with wx.FileDialog(
+            self,
+            "Open logic definition file",
+            wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return
+            path = dialog.GetPath()
+
+        self.load_definition_file(path)
+
+    def load_definition_file(self, path):
+        """Replace the current simulator state with a parsed file."""
+        self.stop_auto_run()
+        names = Names()
+        devices = Devices(names)
+        network = Network(names, devices)
+        monitors = Monitors(names, devices, network)
+        scanner = Scanner(path, names)
+        parser = Parser(names, devices, network, monitors, scanner)
+
+        if not parser.parse_network():
+            wx.MessageBox(
+                "The selected definition file could not be parsed.\n"
+                "Check the terminal for syntax or semantic errors.",
+                "File Load Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            return
+
+        self.path = path
+        self.controller = GuiController(names, devices, network, monitors)
+        self.canvas.devices = devices
+        self.canvas.monitors = monitors
+        self.canvas.reset_view()
+        self.refresh_choices()
+        self.set_status("Loaded " + path)
+
+    def on_help(self):
+        """Display a concise user guide."""
+        wx.MessageBox(
+            "Run: cold-starts the circuit and records N cycles.\n"
+            "Continue: records N more cycles without clearing traces.\n"
+            "Step: advances by one cycle.\n"
+            "Auto Run: keeps stepping until you stop it.\n"
+            "Set Switch: changes the selected switch to 0 or 1.\n"
+            "Add/Remove Monitor: controls which outputs are shown.\n"
+            "Mouse drag pans the display; mouse wheel zooms it.\n"
+            "File > Open loads another definition file.",
+            "Interface Help",
+            wx.OK | wx.ICON_INFORMATION,
+        )
+
+    def on_about(self):
+        """Display application information."""
+        wx.MessageBox(
+            "GF2 Logic Simulator\n"
+            "Graphical interface with circuit overview and oscilloscope.",
+            "About Logsim",
+            wx.OK | wx.ICON_INFORMATION,
+        )
 
     def after_action(self, success, message):
         """Refresh state after a user action."""

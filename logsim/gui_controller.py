@@ -54,6 +54,22 @@ class GuiController:
             )
         return False, message
 
+    def step_simulation(self):
+        """Run exactly one cycle, cold-starting if necessary."""
+        if self.cycles_completed == 0:
+            return self.run_from_start(1)
+
+        success, message, cycles_run = self.run_network(1)
+        self.cycles_completed += cycles_run
+        if success:
+            return (
+                True,
+                "Advanced one cycle. Total: "
+                + str(self.cycles_completed)
+                + "."
+            )
+        return False, message
+
     def run_network(self, cycles):
         """Run the network for a number of cycles.
 
