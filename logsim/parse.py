@@ -91,16 +91,10 @@ class Parser:
                 self.report_syntax_error(
                     "device name must start with a letter"
                 )
-                self.recover_to([self.scanner.SEMICOLON,
-                                 self.scanner.RIGHT_BRACE])
-                if self.symbol.type == self.scanner.SEMICOLON:
-                    self.advance()
+                self.recover_device_declaration()
             else:
                 self.report_syntax_error("expected device declaration")
-                self.recover_to([self.scanner.SEMICOLON,
-                                 self.scanner.RIGHT_BRACE])
-                if self.symbol.type == self.scanner.SEMICOLON:
-                    self.advance()
+                self.recover_device_declaration()
 
         if device_count == 0:
             self.report_syntax_error(
@@ -389,9 +383,8 @@ class Parser:
 
     def is_gate_kind(self):
         """Return True if the current symbol is a logic gate keyword."""
-        return self.symbol.id in self.gate_type_ids and (
-            self.symbol.type == self.scanner.KEYWORD
-        )
+        return (self.symbol.type == self.scanner.KEYWORD and
+                self.symbol.id in self.gate_type_ids)
 
     def is_ambiguous_dtype_output(self, device_id, output_id):
         """Return True if a DTYPE output has been used without Q or QBAR."""
@@ -497,4 +490,10 @@ class Parser:
         """Skip symbols until one of the stopping symbol types is found."""
         while (self.symbol.type not in stopping_types and
                self.symbol.type != self.scanner.EOF):
+            self.advance()
+
+    def recover_device_declaration(self):
+        """Skip a malformed device declaration and consume its semicolon."""
+        self.recover_to([self.scanner.SEMICOLON, self.scanner.RIGHT_BRACE])
+        if self.symbol.type == self.scanner.SEMICOLON:
             self.advance()

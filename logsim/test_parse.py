@@ -11,27 +11,19 @@ from parse import Parser
 from scanner import Scanner
 
 
-@pytest.fixture
-def parser_parts():
-    """Return fresh parser dependencies."""
-    names = Names()
-    devices = Devices(names)
-    network = Network(names, devices)
-    monitors = Monitors(names, devices, network)
-    return names, devices, network, monitors
+EXAMPLE_FILES = [
+    Path("examples/example1_mixed_combinational.txt"),
+    Path("examples/example2_clocked_dtype.txt"),
+    Path("examples/example3_flip_flop_switch.txt"),
+]
+EXAMPLE3_PATH = Path("examples/example3_flip_flop_switch.txt")
 
 
 def make_parser(tmp_path, text):
     """Create a parser for text in a temporary definition file."""
     path = tmp_path / "definition.txt"
     path.write_text(text, encoding="utf-8")
-    names = Names()
-    devices = Devices(names)
-    network = Network(names, devices)
-    monitors = Monitors(names, devices, network)
-    scanner = Scanner(path, names)
-    parser = Parser(names, devices, network, monitors, scanner)
-    return parser, names, devices, network, monitors
+    return make_parser_from_path(path)
 
 
 def make_parser_from_path(path):
@@ -45,11 +37,7 @@ def make_parser_from_path(path):
     return parser, names, devices, network, monitors
 
 
-@pytest.mark.parametrize("example_path", [
-    Path("examples/example1_mixed_combinational.txt"),
-    Path("examples/example2_clocked_dtype.txt"),
-    Path("examples/example3_flip_flop_switch.txt"),
-])
+@pytest.mark.parametrize("example_path", EXAMPLE_FILES)
 def test_parse_example_files(example_path):
     """Test if the checked-in example definition files parse successfully."""
     parser, names, devices, network, monitors = make_parser_from_path(
@@ -62,7 +50,7 @@ def test_parse_example_files(example_path):
 def test_example3_flip_flop_switch_behaviour():
     """Test if example3 is wired as a toggling DTYPE switch."""
     parser, names, devices, network, monitors = make_parser_from_path(
-        Path("examples/example3_flip_flop_switch.txt")
+        EXAMPLE3_PATH
     )
 
     assert parser.parse_network()
@@ -82,10 +70,10 @@ def test_example3_flip_flop_switch_behaviour():
 
     q_trace = monitors.monitors_dictionary[(ff_id, q_id)]
     qbar_trace = monitors.monitors_dictionary[(ff_id, qbar_id)]
+    settled_signals = [devices.LOW, devices.HIGH]
     settled_pairs = [
         (q, qbar) for q, qbar in zip(q_trace, qbar_trace)
-        if q in [devices.LOW, devices.HIGH]
-        and qbar in [devices.LOW, devices.HIGH]
+        if q in settled_signals and qbar in settled_signals
     ]
 
     assert settled_pairs
@@ -452,6 +440,7 @@ def test_parse_rejects_monitor_placed_on_non_output_signal(tmp_path):
     )
 
     assert not parser.parse_network()
+
 
 def test_parse_reports_numeric_device_name_without_section_cascade(
         tmp_path, capsys):
