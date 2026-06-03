@@ -8,15 +8,41 @@ These files use the current revised grammar:
 - `XOR`
 - `DTYPE`
 
-## Parser and text-interface smoke tests
+## Choosing the interface
 
-From the repository root, run:
+Use `-c` for the text/command-line interface:
 
 ```bash
 python3 logsim/logsim.py -c examples/example1_mixed_combinational.txt
 ```
 
-At the prompt, try:
+Omit `-c` for the graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+```
+
+If `python3` cannot import `wx`, use the Python executable from the conda environment where `wxPython` is installed, for example:
+
+```bash
+python logsim/logsim.py examples/example1_mixed_combinational.txt
+```
+
+## Example 1: mixed combinational logic
+
+Text interface:
+
+```bash
+python3 logsim/logsim.py -c examples/example1_mixed_combinational.txt
+```
+
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+```
+
+At the text prompt, try:
 
 ```text
 h
@@ -28,13 +54,21 @@ z G_NOR
 q
 ```
 
-Then try the DTYPE example:
+## Example 2: clocked DTYPE
+
+Text interface:
 
 ```bash
 python3 logsim/logsim.py -c examples/example2_clocked_dtype.txt
 ```
 
-At the prompt, try:
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example2_clocked_dtype.txt
+```
+
+At the text prompt, try:
 
 ```text
 r 10
@@ -46,13 +80,21 @@ z FF1.QBAR
 q
 ```
 
-Then try the flip-flop switch example:
+## Example 3: flip-flop switch
+
+Text interface:
 
 ```bash
 python3 logsim/logsim.py -c examples/example3_flip_flop_switch.txt
 ```
 
-At the prompt, try:
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example3_flip_flop_switch.txt
+```
+
+At the text prompt, try:
 
 ```text
 r 10
@@ -62,6 +104,74 @@ m FF_SWITCH.QBAR
 z FF_SWITCH.QBAR
 q
 ```
+
+## Example 4: one-bit full adder
+
+Text interface:
+
+```bash
+python3 logsim/logsim.py -c examples/example4_full_adder.txt
+```
+
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example4_full_adder.txt
+```
+
+At the text prompt, try:
+
+```text
+r 1
+s A 1
+c 1
+s B 1
+c 1
+s CIN 1
+c 1
+q
+```
+
+Expected full-adder behaviour:
+
+```text
+A B CIN | SUM COUT
+0 0 0   | 0   0
+1 0 0   | 1   0
+1 1 0   | 0   1
+1 1 1   | 1   1
+```
+
+## Example 5: GUI stress test with multi-input gates
+
+Text interface:
+
+```bash
+python3 logsim/logsim.py -c examples/example5_gui_stress_multi_input.txt
+```
+
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example5_gui_stress_multi_input.txt
+```
+
+This file is intended for GUI stress testing. It uses a six-input `AND`, several five-input gates, two clocks, a DTYPE, long device names, many connections, and many monitors.
+
+At the text prompt, try:
+
+```text
+r 20
+s SW_A 1
+s SW_C 1
+s SW_E 1
+c 10
+s RESET_MAIN 1
+c 10
+q
+```
+
+In the GUI, use the run/continue controls, resize the window, and add/remove monitors such as `MEMORY_CELL_LONG_NAME.Q`, `FINAL_OR_OUTPUT`, and `WIDE_AND_SIX_INPUTS`.
 
 ## Automated checks
 

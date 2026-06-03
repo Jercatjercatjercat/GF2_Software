@@ -1,0 +1,43 @@
+# Example 4: one-bit full adder
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(0);
+    CIN : SWITCH(0);
+
+    XOR_AB : XOR;
+    SUM : XOR;
+
+    AND_AB : AND(2);
+    AND_CIN_XOR : AND(2);
+    COUT : OR(2);
+}
+
+CONNECT {
+    # SUM = A XOR B XOR CIN
+    A -> XOR_AB.I1;
+    B -> XOR_AB.I2;
+
+    XOR_AB -> SUM.I1;
+    CIN -> SUM.I2;
+
+    # COUT = (A AND B) OR (CIN AND (A XOR B))
+    A -> AND_AB.I1;
+    B -> AND_AB.I2;
+
+    CIN -> AND_CIN_XOR.I1;
+    XOR_AB -> AND_CIN_XOR.I2;
+
+    AND_AB -> COUT.I1;
+    AND_CIN_XOR -> COUT.I2;
+}
+
+MONITOR {
+    A,
+    B,
+    CIN,
+    SUM,
+    COUT
+};
+
+END;

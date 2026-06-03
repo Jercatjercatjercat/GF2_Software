@@ -144,3 +144,25 @@ def test_unknown_signal_lookup_does_not_mutate_names(controller):
     assert not success
     assert message == "Unknown signal: NO_SUCH_SIGNAL"
     assert controller.names.names == before
+
+
+def test_list_device_readings_shows_switches_and_gate_outputs(controller):
+    """Test if GUI readings list current switch and gate values."""
+    controller.run_from_start(1)
+
+    readings = controller.list_device_readings()
+
+    assert "SW1 = 0" in readings
+    assert "SW2 = 1" in readings
+    assert "G1 = 0" in readings
+
+
+def test_list_device_readings_updates_after_switch_change(controller):
+    """Test if readings reflect changed switch state and gate output."""
+    controller.set_switch("SW1", 1)
+    controller.run_from_start(1)
+
+    readings = controller.list_device_readings()
+
+    assert "SW1 = 1" in readings
+    assert "G1 = 1" in readings

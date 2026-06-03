@@ -156,6 +156,52 @@ class GuiController:
         _, unmonitored = self.monitors.get_signal_names()
         return unmonitored
 
+    def list_device_readings(self):
+        """Return readable current output values for all devices."""
+        readings = []
+        for device in self.devices.devices_list:
+            device_name = self.names.get_name_string(device.device_id)
+            if device.device_kind == self.devices.SWITCH:
+                readings.append(
+                    device_name + " = "
+                    + self.signal_to_text(device.switch_state)
+                )
+                continue
+
+            for output_id in self.sorted_output_ids(device.outputs):
+                signal_name = self.devices.get_signal_name(
+                    device.device_id, output_id
+                )
+                readings.append(
+                    signal_name + " = "
+                    + self.signal_to_text(device.outputs[output_id])
+                )
+        return readings
+
+    def sorted_output_ids(self, outputs):
+        """Return output port IDs in a stable display order."""
+        return sorted(outputs, key=self.output_sort_name)
+
+    def output_sort_name(self, output_id):
+        """Return the display name used to sort an output port."""
+        if output_id is None:
+            return ""
+        return str(self.names.get_name_string(output_id))
+
+    def signal_to_text(self, signal):
+        """Return a short display string for a simulator signal value."""
+        if signal == self.devices.LOW:
+            return "0"
+        if signal == self.devices.HIGH:
+            return "1"
+        if signal == self.devices.RISING:
+            return "R"
+        if signal == self.devices.FALLING:
+            return "F"
+        if signal == self.devices.BLANK:
+            return "-"
+        return "?"
+
     def get_existing_signal_ids(self, signal_name):
         """Return IDs for an existing signal name, without adding names."""
         if not isinstance(signal_name, str) or signal_name == "":
