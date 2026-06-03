@@ -412,7 +412,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             scope_x, plot_x, plot_y, plot_height, monitor_items,
             first_cycle, cycle_count
         )
-        self.draw_scope_axis(plot_x, plot_y, cycle_count, first_cycle)
+        self.draw_scope_axis(
+            plot_x, plot_y, cycle_count, first_cycle, max_cycles
+        )
 
     def draw_scope_header(self, bounds):
         """Draw the oscilloscope title strip."""
@@ -501,10 +503,42 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
+            self.draw_signal_level_scale(
+                plot_x, plot_y, plot_height, row_base, row_gap
+            )
             visible_signals = signal_list[
                 first_cycle:first_cycle + cycle_count
             ]
             self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
+
+    def draw_signal_level_scale(self, plot_x, plot_y, plot_height, row_base,
+                                row_gap):
+        """Draw 1/0 scale labels and guide lines for one waveform row."""
+        high_y = row_base + self.high_offset
+        low_y = row_base + self.low_offset
+
+        self.set_colour(0.82, 0.82, 0.84)
+        GL.glBegin(GL.GL_LINES)
+        GL.glVertex2f(plot_x, high_y)
+        GL.glVertex2f(plot_x + 8, high_y)
+        GL.glVertex2f(plot_x, low_y)
+        GL.glVertex2f(plot_x + 8, low_y)
+        GL.glEnd()
+
+        if row_gap >= 18:
+            self.render_text("1", plot_x - 18, high_y - 4,
+                             (0.34, 0.34, 0.36))
+            self.render_text("0", plot_x - 18, low_y - 4,
+                             (0.34, 0.34, 0.36))
+
+        if row_gap >= 26:
+            self.set_colour(0.92, 0.92, 0.93)
+            GL.glBegin(GL.GL_LINES)
+            GL.glVertex2f(plot_x, high_y)
+            GL.glVertex2f(plot_x + 40, high_y)
+            GL.glVertex2f(plot_x, low_y)
+            GL.glVertex2f(plot_x + 40, low_y)
+            GL.glEnd()
 
     def draw_empty_scope_labels(self, scope_x, scope_y, monitor_items):
         """Show monitored signal names neatly before any run."""
@@ -640,7 +674,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
                          (0.26, 0.26, 0.28))
 
-    def draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle):
+    def draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle,
+                        max_cycles):
         """Draw cycle tick labels along the bottom of the scope."""
         self.set_colour(0.22, 0.22, 0.24)
         GL.glBegin(GL.GL_LINES)
@@ -658,7 +693,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glEnd()
             self.render_text(str(first_cycle + cycle), x_pos - 5, plot_y - 20)
 
-        self.render_text("Cycles", plot_x, plot_y - 34)
+        last_cycle = max(first_cycle + cycle_count - 1, first_cycle)
+        last_cycle = min(last_cycle, max(max_cycles - 1, 0))
+        self.render_text(
+            "Cycles shown: " + str(first_cycle) + "-" + str(last_cycle),
+            plot_x, plot_y - 34, (0.20, 0.20, 0.22)
+        )
+        self.render_text(
+            "Level", plot_x - 30, plot_y - 34, (0.34, 0.34, 0.36)
+        )
 
     def max_recorded_cycles(self, monitor_items):
         """Return the longest recorded monitor trace."""
@@ -872,6 +915,7 @@ class Gui(wx.Frame):
         self.help_button = wx.Button(self, wx.ID_ANY, "Help")
         self.status_label = wx.StaticText(self, wx.ID_ANY, "")
         self.status_label.Wrap(230)
+        self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
 
         self.switch_label = wx.StaticText(self, wx.ID_ANY, "Switch")
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
@@ -914,6 +958,9 @@ class Gui(wx.Frame):
                                         wx.VERTICAL)
         status_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Status"),
                                        wx.VERTICAL)
+        readings_box = wx.StaticBoxSizer(
+            wx.StaticBox(self, label="Readings"), wx.VERTICAL
+        )
 
         toolbar_sizer.Add(self.cycles_label, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
@@ -954,9 +1001,11 @@ class Gui(wx.Frame):
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
         status_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
+        readings_box.Add(self.readings_list, 1, wx.EXPAND | wx.ALL, 6)
 
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(readings_box, 1, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(status_box, 0, wx.EXPAND | wx.ALL, 6)
 
         main_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
@@ -1171,7 +1220,7 @@ class Gui(wx.Frame):
         self.set_status(message, error=not success)
 
     def refresh_choices(self):
-        """Refresh switch and monitor choice controls."""
+        """Refresh switch, monitor, and reading controls."""
         self.populate_choice(
             self.switch_choice, self.controller.list_switches()
         )
@@ -1183,6 +1232,14 @@ class Gui(wx.Frame):
             self.remove_monitor_choice,
             self.controller.list_monitored_signals(),
         )
+        self.refresh_readings()
+
+    def refresh_readings(self):
+        """Refresh the live device output readings list."""
+        self.readings_list.Clear()
+        readings = self.controller.list_device_readings()
+        if readings:
+            self.readings_list.AppendItems(readings)
 
     def populate_choice(self, choice, values):
         """Populate a wx.Choice while preserving selection where possible."""
