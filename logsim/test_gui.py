@@ -1,0 +1,367 @@
+"""Test GUI canvas helpers without opening a wxPython window."""
+
+import importlib
+import sys
+import types
+from types import SimpleNamespace
+
+
+def install_gui_dependency_stubs():
+    """Install tiny wx/OpenGL stubs for headless GUI helper tests."""
+    wx_module = types.ModuleType("wx")
+    wxcanvas_module = types.ModuleType("wx.glcanvas")
+    opengl_module = types.ModuleType("OpenGL")
+    gl_module = types.ModuleType("OpenGL.GL")
+    glut_module = types.ModuleType("OpenGL.GLUT")
+
+    class DummyWidget:
+        """Object that accepts any GUI construction call."""
+
+        def __init__(self, *args, **kwargs):
+            """Ignore GUI constructor arguments."""
+
+    wx_module.Frame = DummyWidget
+    wx_module.Panel = DummyWidget
+    wx_module.Timer = DummyWidget
+    wx_module.BoxSizer = DummyWidget
+    wx_module.StaticBox = DummyWidget
+    wx_module.StaticBoxSizer = DummyWidget
+    wx_module.Button = DummyWidget
+    wx_module.StaticText = DummyWidget
+    wx_module.SpinCtrl = DummyWidget
+    wx_module.Slider = DummyWidget
+    wx_module.Choice = DummyWidget
+    wx_module.RadioBox = DummyWidget
+    wx_module.ListBox = DummyWidget
+    wx_module.TextCtrl = DummyWidget
+    wx_module.MenuBar = DummyWidget
+    wx_module.Menu = DummyWidget
+    wx_module.FileDialog = DummyWidget
+    wx_module.MessageDialog = DummyWidget
+    wx_module.Colour = lambda *args: args
+    wx_module.GetKeyState = lambda *args: False
+    wx_module.WXK_SHIFT = 0
+
+    wxcanvas_module.GLCanvas = DummyWidget
+    wxcanvas_module.GLContext = DummyWidget
+    wxcanvas_module.WX_GL_RGBA = 1
+    wxcanvas_module.WX_GL_DOUBLEBUFFER = 2
+    wxcanvas_module.WX_GL_DEPTH_SIZE = 3
+
+    glut_module.GLUT_BITMAP_HELVETICA_12 = object()
+    glut_module.glutInit = lambda *args, **kwargs: None
+    glut_module.glutBitmapCharacter = lambda *args, **kwargs: None
+
+    def missing_gl_attribute(_name):
+        """Return a no-op function for any OpenGL symbol."""
+        return lambda *args, **kwargs: None
+
+    gl_module.__getattr__ = missing_gl_attribute
+    opengl_module.GL = gl_module
+    opengl_module.GLUT = glut_module
+
+    sys.modules.setdefault("wx", wx_module)
+    sys.modules.setdefault("wx.glcanvas", wxcanvas_module)
+    sys.modules.setdefault("OpenGL", opengl_module)
+    sys.modules.setdefault("OpenGL.GL", gl_module)
+    sys.modules.setdefault("OpenGL.GLUT", glut_module)
+
+
+try:
+    gui = importlib.import_module("gui")
+except ModuleNotFoundError as error:
+    if error.name not in {"wx", "OpenGL"}:
+        raise
+    install_gui_dependency_stubs()
+    sys.modules.pop("gui", None)
+    gui = importlib.import_module("gui")
+
+MyGLCanvas = gui.MyGLCanvas
+
+
+class FakeNames:
+    """Minimal name lookup object for canvas layout tests."""
+
+    def __init__(self, names):
+        """Store display names by device or port ID."""
+        self.names = names
+
+    def get_name_string(self, name_id):
+        """Return the display string for an ID."""
+        return self.names.get(name_id, str(name_id))
+
+
+class FakeDevices:
+    """Small device collection exposing the canvas-facing API."""
+
+    LOW = 0
+    HIGH = 1
+    BLANK = 2
+    CLOCK = "CLOCK"
+    QBAR_ID = "QBAR"
+
+    def __init__(self, device_list, names=None):
+        """Store fake devices and display names."""
+        self.devices_list = device_list
+        self._devices = {
+            device.device_id: device for device in self.devices_list
+        }
+        self.names = FakeNames(names or {})
+
+    def get_signal_name(self, device_id, output_id):
+        """Return a signal name in the same form as the real device API."""
+        device_name = self.names.get_name_string(device_id)
+        if output_id is None:
+            return device_name
+        return device_name + "." + self.names.get_name_string(output_id)
+
+    def get_device(self, device_id):
+        """Return a fake device by ID."""
+        return self._devices.get(device_id)
+
+
+def fake_device(device_id, device_kind="GATE", inputs=None):
+    """Create a minimal fake device object."""
+    return SimpleNamespace(
+        device_id=device_id,
+        device_kind=device_kind,
+        inputs=inputs or {},
+        outputs={None: FakeDevices.LOW},
+    )
+
+
+def make_canvas(devices):
+    """Create a MyGLCanvas instance without running wx initialisation."""
+    canvas = MyGLCanvas.__new__(MyGLCanvas)
+    canvas.devices = devices
+    canvas.default_cycle_width = 28
+    canvas.cycle_width = canvas.default_cycle_width
+    canvas.row_height = 34
+    canvas.high_offset = 18
+    canvas.low_offset = 4
+    canvas.scope_first_cycle = 0
+    canvas.scope_first_row = 0
+    canvas.scope_geometry = {}
+    canvas.circuit_scroll_x = 0
+    canvas.circuit_scroll_y = 0
+    canvas.circuit_geometry = {}
+    canvas.dark_mode = False
+    canvas.colour_blind_mode = False
+    canvas.trace_colours = [
+        (0.20, 0.23, 0.78),
+        (0.16, 0.50, 0.26),
+        (0.70, 0.22, 0.22),
+    ]
+    canvas.colour_blind_trace_colours = [
+        (0.00, 0.45, 0.70),
+        (0.90, 0.62, 0.00),
+        (0.00, 0.62, 0.45),
+    ]
+    return canvas
+
+
+def test_initial_scope_uses_waveform_layout_before_first_run():
+    """Test if the startup oscilloscope uses the real row layout."""
+    devices = FakeDevices(
+        [fake_device("CLK"), fake_device("DATA"), fake_device("OUT")],
+        {"CLK": "CLK", "DATA": "DATA_SW", "OUT": "FINAL_TEST"},
+    )
+    canvas = make_canvas(devices)
+    monitor_items = [
+        (("CLK", None), []),
+        (("DATA", None), []),
+        (("OUT", None), []),
+    ]
+    calls = {}
+    rendered_text = []
+
+    canvas.draw_rectangle = lambda *args: None
+    canvas.draw_scope_header = lambda *args: None
+    canvas.render_text = lambda *args: rendered_text.append(args)
+    canvas.draw_scope_grid = lambda *args: calls.setdefault("grid", args)
+    canvas.draw_scope_scrollbars = (
+        lambda *args: calls.setdefault("scrollbars", args)
+    )
+    canvas.draw_empty_scope_rows = (
+        lambda *args: calls.setdefault("empty_rows", args)
+    )
+    canvas.draw_scope_axis = lambda *args: calls.setdefault("axis", args)
+
+    canvas.draw_oscilloscope((0, 0, 800, 360), monitor_items)
+
+    assert any("Press Run" in text[0] for text in rendered_text)
+    assert calls["grid"][4] == 10
+    assert calls["scrollbars"][6] == 10
+    assert calls["scrollbars"][7] == 10
+    assert calls["scrollbars"][8] == 0
+    assert calls["scrollbars"][9] == len(monitor_items)
+    assert calls["scrollbars"][10] == len(monitor_items)
+    assert calls["empty_rows"][4] == monitor_items
+    assert calls["empty_rows"][5] == 10
+    assert calls["empty_rows"][6] == 0
+    assert calls["axis"][2:] == (10, 0, 10)
+
+
+def test_initial_scope_respects_vertical_scroll_for_many_monitors():
+    """Test if the startup scope only draws visible monitor rows."""
+    devices = FakeDevices(
+        [fake_device(index) for index in range(12)],
+        {index: "SIG_" + str(index) for index in range(12)},
+    )
+    canvas = make_canvas(devices)
+    canvas.scope_first_row = 3
+    monitor_items = [((index, None), []) for index in range(12)]
+    calls = {}
+
+    canvas.draw_rectangle = lambda *args: None
+    canvas.draw_scope_header = lambda *args: None
+    canvas.render_text = lambda *args: None
+    canvas.draw_scope_grid = lambda *args: None
+    canvas.draw_scope_scrollbars = (
+        lambda *args: calls.setdefault("scrollbars", args)
+    )
+    canvas.draw_empty_scope_rows = (
+        lambda *args: calls.setdefault("empty_rows", args)
+    )
+    canvas.draw_scope_axis = lambda *args: None
+
+    canvas.draw_oscilloscope((0, 0, 640, 260), monitor_items)
+
+    visible_items = calls["empty_rows"][4]
+    assert visible_items == monitor_items[3:6]
+    assert calls["empty_rows"][6] == 3
+    assert calls["scrollbars"][9] == 12
+    assert calls["scrollbars"][10] == 3
+
+
+def test_empty_scope_rows_draw_blank_aligned_traces():
+    """Test if pre-run rows draw labels, level marks, and blank traces."""
+    devices = FakeDevices(
+        [fake_device("A"), fake_device("B")],
+        {"A": "DATA_SW", "B": "FINAL_TEST"},
+    )
+    canvas = make_canvas(devices)
+    monitor_items = [(("A", None), []), (("B", None), [])]
+    labels = []
+    colour_indexes = []
+    level_rows = []
+    traces = []
+
+    def trace_colour(device_id, output_id, index):
+        colour_indexes.append(index)
+        return (index, 0, 0)
+
+    canvas.trace_colour_for_monitor = trace_colour
+    canvas.render_text = lambda text, *args: labels.append(text)
+    canvas.draw_signal_level_scale = (
+        lambda *args: level_rows.append(args)
+    )
+    canvas.draw_digital_signal = lambda *args: traces.append(args)
+
+    canvas.draw_empty_scope_rows(
+        10, 100, 20, 120, monitor_items, 5, first_row=4
+    )
+
+    assert labels == ["DATA_SW", "FINAL_TEST"]
+    assert colour_indexes == [4, 5]
+    assert len(level_rows) == 2
+    assert len(traces) == 2
+    assert traces[0][2] == [devices.BLANK] * 5
+    assert traces[1][2] == [devices.BLANK] * 5
+
+
+def test_trace_colour_for_monitor_handles_accessibility_modes():
+    """Test if trace colours honour clock, QBAR, and colour-blind rules."""
+    devices = FakeDevices(
+        [
+            fake_device("CLK", device_kind=FakeDevices.CLOCK),
+            fake_device("DFF"),
+        ]
+    )
+    canvas = make_canvas(devices)
+
+    assert canvas.trace_colour_for_monitor("CLK", None, 0) == (
+        0.20, 0.55, 0.25
+    )
+    assert canvas.trace_colour_for_monitor("DFF", devices.QBAR_ID, 1) == (
+        0.48, 0.30, 0.68
+    )
+
+    canvas.colour_blind_mode = True
+
+    assert canvas.trace_colour_for_monitor("CLK", None, 4) == (
+        canvas.colour_blind_trace_colours[1]
+    )
+
+
+def test_circuit_content_size_grows_only_for_complex_diagrams():
+    """Test if simple circuits fit while crowded circuits get scroll space."""
+    simple_devices = FakeDevices(
+        [
+            fake_device("SW"),
+            fake_device("GATE", inputs={"I1": ("SW", None)}),
+        ],
+        {"SW": "SW", "GATE": "GATE"},
+    )
+    simple_canvas = make_canvas(simple_devices)
+
+    assert simple_canvas.circuit_content_size(500, 300) == (500, 300)
+
+    crowded_device_list = [
+        fake_device("SW_" + str(index)) for index in range(8)
+    ]
+    crowded_device_list.append(
+        fake_device(
+            "OUT",
+            inputs={
+                "I" + str(index): ("SW_" + str(index), None)
+                for index in range(8)
+            },
+        )
+    )
+    crowded_devices = FakeDevices(
+        crowded_device_list,
+        {device.device_id: device.device_id for device in crowded_device_list},
+    )
+    crowded_canvas = make_canvas(crowded_devices)
+
+    content_width, content_height = crowded_canvas.circuit_content_size(
+        300, 220
+    )
+
+    assert content_width > 300
+    assert content_height > 220
+
+
+def test_reset_view_clears_canvas_scroll_and_zoom_state():
+    """Test if reset view restores canvas navigation state."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    refreshed = []
+    canvas.Refresh = lambda: refreshed.append(True)
+    canvas.pan_x = 30
+    canvas.pan_y = -20
+    canvas.zoom = 1.5
+    canvas.circuit_scroll_x = 42
+    canvas.circuit_scroll_y = 64
+    canvas.circuit_drag_mode = "vertical"
+    canvas.scope_first_cycle = 15
+    canvas.scope_first_row = 3
+    canvas.scope_drag_mode = "horizontal"
+    canvas.follow_latest_cycles = True
+    canvas.init = True
+
+    canvas.reset_view()
+
+    assert canvas.pan_x == 0
+    assert canvas.pan_y == 0
+    assert canvas.zoom == 1.0
+    assert canvas.circuit_scroll_x == 0
+    assert canvas.circuit_scroll_y == 0
+    assert canvas.circuit_drag_mode is None
+    assert canvas.scope_first_cycle == 0
+    assert canvas.scope_first_row == 0
+    assert canvas.scope_drag_mode is None
+    assert canvas.follow_latest_cycles is False
+    assert canvas.init is False
+    assert refreshed == [True]
