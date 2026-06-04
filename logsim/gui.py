@@ -1181,6 +1181,8 @@ class Gui(wx.Frame):
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
+        self.current_language = "en"
+        self.translations = self.build_translations()
         self.controller = GuiController(names, devices, network, monitors)
         self.default_monitor_keys = []
         self.default_monitor_traces = {}
@@ -1198,52 +1200,304 @@ class Gui(wx.Frame):
 
         self.SetSizeHints(760, 520)
 
+    def build_translations(self):
+        """Return UI label translations keyed by language code."""
+        return {
+            "en": {
+                "menu_file": "&File",
+                "menu_help": "&Help",
+                "menu_open": "&Open definition file...",
+                "menu_save": "&Save definition as...",
+                "menu_export_circuit": "&Export circuit...",
+                "menu_export_scope": "&Export oscilloscope...",
+                "menu_exit": "&Exit",
+                "menu_help_item": "&Help",
+                "menu_about": "&About",
+                "cycles": "Cycles",
+                "run": "Run",
+                "continue": "Continue",
+                "step": "Step",
+                "auto_run": "Auto Run",
+                "auto_speed": "Auto speed",
+                "open_file": "Open File",
+                "save_file": "Save File",
+                "export_circuit": "Export Circuit",
+                "export_scope": "Export Scope",
+                "language": "Language",
+                "help": "Help",
+                "switches": "Switches",
+                "monitors": "Monitors",
+                "readings": "Readings",
+                "log": "Log",
+                "switch": "Switch",
+                "value": "Value",
+                "set_switch": "Set Switch",
+                "available_signals": "Available signals",
+                "add_monitor": "Add Monitor",
+                "current_monitors": "Current monitors",
+                "remove_monitor": "Remove Monitor",
+                "reset_view": "Reset View",
+                "status_prefix": "Status",
+                "language_changed": "Language changed.",
+                "help_title": "Interface Help",
+                "about_title": "About Logsim",
+                "about_text": (
+                    "GF2 Logic Simulator\n"
+                    "Graphical interface with circuit overview and "
+                    "oscilloscope."
+                ),
+                "help_text": (
+                    "Run: cold-starts the circuit and records N cycles.\n"
+                    "Continue: records N more cycles without clearing "
+                    "traces.\n"
+                    "Step: advances by one cycle.\n"
+                    "Auto Run: keeps stepping until you stop it.\n"
+                    "Set Switch: changes the selected switch to 0 or 1.\n"
+                    "Add/Remove Monitor: controls which outputs are shown.\n"
+                    "Mouse drag pans the display; mouse wheel zooms it.\n"
+                    "Over the oscilloscope, the mouse wheel scrolls signal "
+                    "rows.\n"
+                    "File > Open loads another definition file."
+                ),
+            },
+            "fr": {
+                "menu_file": "&Fichier",
+                "menu_help": "&Aide",
+                "menu_open": "&Ouvrir un fichier...",
+                "menu_save": "&Enregistrer sous...",
+                "menu_export_circuit": "&Exporter le circuit...",
+                "menu_export_scope": "&Exporter oscilloscope...",
+                "menu_exit": "&Quitter",
+                "menu_help_item": "&Aide",
+                "menu_about": "&A propos",
+                "cycles": "Cycles",
+                "run": "Lancer",
+                "continue": "Continuer",
+                "step": "Pas",
+                "auto_run": "Auto",
+                "auto_speed": "Vitesse auto",
+                "open_file": "Ouvrir",
+                "save_file": "Enregistrer",
+                "export_circuit": "Exporter circuit",
+                "export_scope": "Exporter scope",
+                "language": "Langue",
+                "help": "Aide",
+                "switches": "Interrupteurs",
+                "monitors": "Moniteurs",
+                "readings": "Lectures",
+                "log": "Journal",
+                "switch": "Interrupteur",
+                "value": "Valeur",
+                "set_switch": "Regler interrupteur",
+                "available_signals": "Signaux disponibles",
+                "add_monitor": "Ajouter moniteur",
+                "current_monitors": "Moniteurs actuels",
+                "remove_monitor": "Retirer moniteur",
+                "reset_view": "Reinitialiser vue",
+                "status_prefix": "Statut",
+                "language_changed": "Langue modifiee.",
+                "help_title": "Aide interface",
+                "about_title": "A propos de Logsim",
+                "about_text": (
+                    "Simulateur logique GF2\n"
+                    "Interface graphique avec circuit et oscilloscope."
+                ),
+                "help_text": (
+                    "Lancer: demarre le circuit et enregistre N cycles.\n"
+                    "Continuer: ajoute N cycles sans effacer les traces.\n"
+                    "Pas: avance d'un cycle.\n"
+                    "Auto: avance jusqu'a l'arret.\n"
+                    "Regler interrupteur: change un interrupteur a 0 ou 1.\n"
+                    "Ajouter/Retirer moniteur: choisit les sorties visibles.\n"
+                    "Glisser la souris deplace la vue; la molette zoome.\n"
+                    "Sur l'oscilloscope, la molette fait defiler les lignes.\n"
+                    "Fichier > Ouvrir charge un autre fichier."
+                ),
+            },
+            "es": {
+                "menu_file": "&Archivo",
+                "menu_help": "A&yuda",
+                "menu_open": "&Abrir archivo...",
+                "menu_save": "&Guardar como...",
+                "menu_export_circuit": "&Exportar circuito...",
+                "menu_export_scope": "&Exportar osciloscopio...",
+                "menu_exit": "&Salir",
+                "menu_help_item": "A&yuda",
+                "menu_about": "&Acerca de",
+                "cycles": "Ciclos",
+                "run": "Ejecutar",
+                "continue": "Continuar",
+                "step": "Paso",
+                "auto_run": "Auto",
+                "auto_speed": "Velocidad",
+                "open_file": "Abrir",
+                "save_file": "Guardar",
+                "export_circuit": "Exportar circuito",
+                "export_scope": "Exportar scope",
+                "language": "Idioma",
+                "help": "Ayuda",
+                "switches": "Interruptores",
+                "monitors": "Monitores",
+                "readings": "Lecturas",
+                "log": "Registro",
+                "switch": "Interruptor",
+                "value": "Valor",
+                "set_switch": "Cambiar interruptor",
+                "available_signals": "Senales disponibles",
+                "add_monitor": "Agregar monitor",
+                "current_monitors": "Monitores actuales",
+                "remove_monitor": "Quitar monitor",
+                "reset_view": "Reiniciar vista",
+                "status_prefix": "Estado",
+                "language_changed": "Idioma cambiado.",
+                "help_title": "Ayuda de interfaz",
+                "about_title": "Acerca de Logsim",
+                "about_text": (
+                    "Simulador logico GF2\n"
+                    "Interfaz grafica con circuito y osciloscopio."
+                ),
+                "help_text": (
+                    "Ejecutar: inicia el circuito y graba N ciclos.\n"
+                    "Continuar: graba N ciclos mas sin borrar trazas.\n"
+                    "Paso: avanza un ciclo.\n"
+                    "Auto: avanza hasta que lo detengas.\n"
+                    "Cambiar interruptor: pone el interruptor en 0 o 1.\n"
+                    "Agregar/Quitar monitor: controla las salidas visibles.\n"
+                    "Arrastrar mueve la vista; la rueda hace zoom.\n"
+                    "Sobre el osciloscopio, la rueda desplaza senales.\n"
+                    "Archivo > Abrir carga otro archivo."
+                ),
+            },
+            "de": {
+                "menu_file": "&Datei",
+                "menu_help": "&Hilfe",
+                "menu_open": "&Datei offnen...",
+                "menu_save": "&Speichern unter...",
+                "menu_export_circuit": "&Schaltung exportieren...",
+                "menu_export_scope": "&Oszilloskop exportieren...",
+                "menu_exit": "&Beenden",
+                "menu_help_item": "&Hilfe",
+                "menu_about": "&Info",
+                "cycles": "Zyklen",
+                "run": "Start",
+                "continue": "Weiter",
+                "step": "Schritt",
+                "auto_run": "Auto",
+                "auto_speed": "Auto Tempo",
+                "open_file": "Offnen",
+                "save_file": "Speichern",
+                "export_circuit": "Schaltung exportieren",
+                "export_scope": "Scope exportieren",
+                "language": "Sprache",
+                "help": "Hilfe",
+                "switches": "Schalter",
+                "monitors": "Monitore",
+                "readings": "Werte",
+                "log": "Log",
+                "switch": "Schalter",
+                "value": "Wert",
+                "set_switch": "Schalter setzen",
+                "available_signals": "Verfugbare Signale",
+                "add_monitor": "Monitor hinzufugen",
+                "current_monitors": "Aktuelle Monitore",
+                "remove_monitor": "Monitor entfernen",
+                "reset_view": "Ansicht reset",
+                "status_prefix": "Status",
+                "language_changed": "Sprache geandert.",
+                "help_title": "Hilfe",
+                "about_title": "Info zu Logsim",
+                "about_text": (
+                    "GF2 Logiksimulator\n"
+                    "Grafische Oberflache mit Schaltung und Oszilloskop."
+                ),
+                "help_text": (
+                    "Start: startet die Schaltung und speichert N Zyklen.\n"
+                    "Weiter: speichert N weitere Zyklen ohne zu loschen.\n"
+                    "Schritt: fuhrt einen Zyklus aus.\n"
+                    "Auto: lauft weiter bis zum Stoppen.\n"
+                    "Schalter setzen: setzt den Schalter auf 0 oder 1.\n"
+                    "Monitor hinzufugen/entfernen: wahlt sichtbare Ausgange.\n"
+                    "Mausziehen verschiebt die Ansicht; Mausrad zoomt.\n"
+                    "Uber dem Oszilloskop scrollt das Mausrad Signalzeilen.\n"
+                    "Datei > Offnen ladt eine andere Datei."
+                ),
+            },
+        }
+
+    def t(self, key):
+        """Translate a UI label for the current language."""
+        language = self.translations.get(self.current_language, {})
+        return language.get(key, self.translations["en"].get(key, key))
+
     def configure_menu(self):
         """Create the File and Help menus."""
         self.help_menu_id = wx.NewIdRef()
         self.export_circuit_menu_id = wx.NewIdRef()
         self.export_scope_menu_id = wx.NewIdRef()
 
-        file_menu = wx.Menu()
-        menu_bar = wx.MenuBar()
-        file_menu.Append(wx.ID_OPEN, "&Open definition file...")
-        file_menu.Append(wx.ID_SAVEAS, "&Save definition as...")
-        file_menu.Append(self.export_circuit_menu_id, "&Export circuit...")
-        file_menu.Append(self.export_scope_menu_id, "&Export oscilloscope...")
-        file_menu.AppendSeparator()
-        file_menu.Append(wx.ID_EXIT, "&Exit")
+        self.file_menu = wx.Menu()
+        self.help_menu = wx.Menu()
+        self.menu_bar = wx.MenuBar()
+        self.open_menu_item = self.file_menu.Append(
+            wx.ID_OPEN, self.t("menu_open")
+        )
+        self.save_menu_item = self.file_menu.Append(
+            wx.ID_SAVEAS, self.t("menu_save")
+        )
+        self.export_circuit_menu_item = self.file_menu.Append(
+            self.export_circuit_menu_id, self.t("menu_export_circuit")
+        )
+        self.export_scope_menu_item = self.file_menu.Append(
+            self.export_scope_menu_id, self.t("menu_export_scope")
+        )
+        self.file_menu.AppendSeparator()
+        self.exit_menu_item = self.file_menu.Append(
+            wx.ID_EXIT, self.t("menu_exit")
+        )
 
-        help_menu = wx.Menu()
-        help_menu.Append(self.help_menu_id, "&Help")
-        help_menu.Append(wx.ID_ABOUT, "&About")
+        self.help_menu_item = self.help_menu.Append(
+            self.help_menu_id, self.t("menu_help_item")
+        )
+        self.about_menu_item = self.help_menu.Append(
+            wx.ID_ABOUT, self.t("menu_about")
+        )
 
-        menu_bar.Append(file_menu, "&File")
-        menu_bar.Append(help_menu, "&Help")
-        self.SetMenuBar(menu_bar)
+        self.menu_bar.Append(self.file_menu, self.t("menu_file"))
+        self.menu_bar.Append(self.help_menu, self.t("menu_help"))
+        self.SetMenuBar(self.menu_bar)
 
     def create_controls(self):
         """Create all sidebar controls."""
-        self.cycles_label = wx.StaticText(self, wx.ID_ANY, "Cycles")
+        self.cycles_label = wx.StaticText(self, wx.ID_ANY, self.t("cycles"))
         self.cycles_spin = wx.SpinCtrl(
             self, wx.ID_ANY, min=0, max=100000, initial=10
         )
-        self.run_button = wx.Button(self, wx.ID_ANY, "Run")
-        self.continue_button = wx.Button(self, wx.ID_ANY, "Continue")
-        self.step_button = wx.Button(self, wx.ID_ANY, "Step")
-        self.auto_run_button = wx.ToggleButton(self, wx.ID_ANY, "Auto Run")
-        self.speed_label = wx.StaticText(self, wx.ID_ANY, "Auto speed")
+        self.run_button = wx.Button(self, wx.ID_ANY, self.t("run"))
+        self.continue_button = wx.Button(
+            self, wx.ID_ANY, self.t("continue")
+        )
+        self.step_button = wx.Button(self, wx.ID_ANY, self.t("step"))
+        self.auto_run_button = wx.ToggleButton(
+            self, wx.ID_ANY, self.t("auto_run")
+        )
+        self.speed_label = wx.StaticText(
+            self, wx.ID_ANY, self.t("auto_speed")
+        )
         self.speed_slider = wx.Slider(
             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
         )
-        self.open_button = wx.Button(self, wx.ID_ANY, "Open File")
-        self.save_button = wx.Button(self, wx.ID_ANY, "Save File")
+        self.open_button = wx.Button(self, wx.ID_ANY, self.t("open_file"))
+        self.save_button = wx.Button(self, wx.ID_ANY, self.t("save_file"))
         self.export_circuit_button = wx.Button(
-            self, wx.ID_ANY, "Export Circuit"
+            self, wx.ID_ANY, self.t("export_circuit")
         )
         self.export_scope_button = wx.Button(
-            self, wx.ID_ANY, "Export Scope"
+            self, wx.ID_ANY, self.t("export_scope")
         )
-        self.help_button = wx.Button(self, wx.ID_ANY, "Help")
+        self.language_button = wx.Button(
+            self, wx.ID_ANY, self.t("language")
+        )
+        self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
         self.log_entries = []
         self.log_text = wx.TextCtrl(
@@ -1260,33 +1514,39 @@ class Gui(wx.Frame):
         )
         self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
 
-        self.switch_label = wx.StaticText(self, wx.ID_ANY, "Switch")
+        self.switch_label = wx.StaticText(self, wx.ID_ANY, self.t("switch"))
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
         self.switch_value = wx.RadioBox(
             self,
             wx.ID_ANY,
-            "Value",
+            self.t("value"),
             choices=["0", "1"],
             majorDimension=2,
             style=wx.RA_SPECIFY_COLS,
         )
-        self.set_switch_button = wx.Button(self, wx.ID_ANY, "Set Switch")
+        self.set_switch_button = wx.Button(
+            self, wx.ID_ANY, self.t("set_switch")
+        )
 
         self.add_monitor_label = wx.StaticText(
-            self, wx.ID_ANY, "Available signals"
+            self, wx.ID_ANY, self.t("available_signals")
         )
         self.add_monitor_choice = wx.Choice(self, wx.ID_ANY)
-        self.add_monitor_button = wx.Button(self, wx.ID_ANY, "Add Monitor")
+        self.add_monitor_button = wx.Button(
+            self, wx.ID_ANY, self.t("add_monitor")
+        )
 
         self.remove_monitor_label = wx.StaticText(
-            self, wx.ID_ANY, "Current monitors"
+            self, wx.ID_ANY, self.t("current_monitors")
         )
         self.remove_monitor_choice = wx.Choice(self, wx.ID_ANY)
         self.remove_monitor_button = wx.Button(
-            self, wx.ID_ANY, "Remove Monitor"
+            self, wx.ID_ANY, self.t("remove_monitor")
         )
 
-        self.reset_view_button = wx.Button(self, wx.ID_ANY, "Reset View")
+        self.reset_view_button = wx.Button(
+            self, wx.ID_ANY, self.t("reset_view")
+        )
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
@@ -1296,16 +1556,14 @@ class Gui(wx.Frame):
         display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        switch_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Switches"),
-                                       wx.VERTICAL)
-        monitor_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Monitors"),
-                                        wx.VERTICAL)
-        readings_box = wx.StaticBoxSizer(
-            wx.StaticBox(self, label="Readings"), wx.VERTICAL
-        )
-        log_box = wx.StaticBoxSizer(
-            wx.StaticBox(self, label="Log"), wx.VERTICAL
-        )
+        self.switch_box = wx.StaticBox(self, label=self.t("switches"))
+        self.monitor_box = wx.StaticBox(self, label=self.t("monitors"))
+        self.readings_box = wx.StaticBox(self, label=self.t("readings"))
+        self.log_box = wx.StaticBox(self, label=self.t("log"))
+        switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
+        monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
+        readings_box = wx.StaticBoxSizer(self.readings_box, wx.VERTICAL)
+        log_box = wx.StaticBoxSizer(self.log_box, wx.VERTICAL)
 
         toolbar_sizer.Add(self.cycles_label, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
@@ -1331,6 +1589,8 @@ class Gui(wx.Frame):
         toolbar_sizer.Add(self.export_circuit_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.export_scope_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.language_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.help_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
@@ -1388,6 +1648,9 @@ class Gui(wx.Frame):
         self.export_scope_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_export_scope()
         )
+        self.language_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_language_button()
+        )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
@@ -1414,6 +1677,83 @@ class Gui(wx.Frame):
             self.on_help()
         elif event_id == wx.ID_ABOUT:
             self.on_about()
+
+    def on_language_button(self):
+        """Show the language selection menu."""
+        language_menu = wx.Menu()
+        language_names = [
+            ("en", "English"),
+            ("fr", "Francais"),
+            ("es", "Espanol"),
+            ("de", "Deutsch"),
+        ]
+
+        for language_code, language_name in language_names:
+            item = language_menu.AppendRadioItem(
+                wx.ID_ANY, language_name
+            )
+            if language_code == self.current_language:
+                item.Check(True)
+            self.Bind(
+                wx.EVT_MENU,
+                lambda event, code=language_code: self.set_language(code),
+                id=item.GetId(),
+            )
+
+        self.language_button.PopupMenu(language_menu)
+        language_menu.Destroy()
+
+    def set_language(self, language_code):
+        """Switch visible GUI labels to the selected language."""
+        if language_code not in self.translations:
+            return
+
+        self.current_language = language_code
+        self.update_language_labels()
+        self.set_status(self.t("language_changed"))
+
+    def update_language_labels(self):
+        """Apply the current language to visible menus and controls."""
+        self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
+        self.menu_bar.SetMenuLabel(1, self.t("menu_help"))
+        self.open_menu_item.SetItemLabel(self.t("menu_open"))
+        self.save_menu_item.SetItemLabel(self.t("menu_save"))
+        self.export_circuit_menu_item.SetItemLabel(
+            self.t("menu_export_circuit")
+        )
+        self.export_scope_menu_item.SetItemLabel(
+            self.t("menu_export_scope")
+        )
+        self.exit_menu_item.SetItemLabel(self.t("menu_exit"))
+        self.help_menu_item.SetItemLabel(self.t("menu_help_item"))
+        self.about_menu_item.SetItemLabel(self.t("menu_about"))
+
+        self.cycles_label.SetLabel(self.t("cycles"))
+        self.run_button.SetLabel(self.t("run"))
+        self.continue_button.SetLabel(self.t("continue"))
+        self.step_button.SetLabel(self.t("step"))
+        self.auto_run_button.SetLabel(self.t("auto_run"))
+        self.speed_label.SetLabel(self.t("auto_speed"))
+        self.open_button.SetLabel(self.t("open_file"))
+        self.save_button.SetLabel(self.t("save_file"))
+        self.export_circuit_button.SetLabel(self.t("export_circuit"))
+        self.export_scope_button.SetLabel(self.t("export_scope"))
+        self.language_button.SetLabel(self.t("language"))
+        self.help_button.SetLabel(self.t("help"))
+
+        self.switch_box.SetLabel(self.t("switches"))
+        self.monitor_box.SetLabel(self.t("monitors"))
+        self.readings_box.SetLabel(self.t("readings"))
+        self.log_box.SetLabel(self.t("log"))
+        self.switch_label.SetLabel(self.t("switch"))
+        self.switch_value.SetLabel(self.t("value"))
+        self.set_switch_button.SetLabel(self.t("set_switch"))
+        self.add_monitor_label.SetLabel(self.t("available_signals"))
+        self.add_monitor_button.SetLabel(self.t("add_monitor"))
+        self.remove_monitor_label.SetLabel(self.t("current_monitors"))
+        self.remove_monitor_button.SetLabel(self.t("remove_monitor"))
+        self.reset_view_button.SetLabel(self.t("reset_view"))
+        self.Layout()
 
     def on_close(self, event):
         """Stop background timers before closing the window."""
@@ -1673,25 +2013,16 @@ class Gui(wx.Frame):
     def on_help(self):
         """Display a concise user guide."""
         wx.MessageBox(
-            "Run: cold-starts the circuit and records N cycles.\n"
-            "Continue: records N more cycles without clearing traces.\n"
-            "Step: advances by one cycle.\n"
-            "Auto Run: keeps stepping until you stop it.\n"
-            "Set Switch: changes the selected switch to 0 or 1.\n"
-            "Add/Remove Monitor: controls which outputs are shown.\n"
-            "Mouse drag pans the display; mouse wheel zooms it.\n"
-            "Over the oscilloscope, the mouse wheel scrolls signal rows.\n"
-            "File > Open loads another definition file.",
-            "Interface Help",
+            self.t("help_text"),
+            self.t("help_title"),
             wx.OK | wx.ICON_INFORMATION,
         )
 
     def on_about(self):
         """Display application information."""
         wx.MessageBox(
-            "GF2 Logic Simulator\n"
-            "Graphical interface with circuit overview and oscilloscope.",
-            "About Logsim",
+            self.t("about_text"),
+            self.t("about_title"),
             wx.OK | wx.ICON_INFORMATION,
         )
 
@@ -1800,7 +2131,10 @@ class Gui(wx.Frame):
             prefix + message + "\nCycles completed: "
             + str(self.controller.cycles_completed)
         )
-        self.SetStatusText("Status: " + status_text.replace("\n", "  |  "))
+        self.SetStatusText(
+            self.t("status_prefix") + ": "
+            + status_text.replace("\n", "  |  ")
+        )
         self.append_log(prefix + message)
 
     def append_log(self, message):
