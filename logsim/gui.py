@@ -57,6 +57,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_geometry = {}
         self.follow_latest_cycles = True
         self.dark_mode = False
+        self.colour_blind_mode = False
         self.last_circuit_bounds = None
         self.last_scope_bounds = None
 
@@ -73,6 +74,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             (0.57, 0.31, 0.70),
             (0.10, 0.55, 0.62),
             (0.72, 0.43, 0.12),
+        ]
+        self.colour_blind_trace_colours = [
+            (0.00, 0.45, 0.70),
+            (0.90, 0.62, 0.00),
+            (0.00, 0.62, 0.45),
+            (0.80, 0.47, 0.65),
+            (0.34, 0.71, 0.91),
+            (0.84, 0.37, 0.00),
+            (0.94, 0.89, 0.26),
         ]
 
         self.Bind(wx.EVT_PAINT, self.on_paint)
@@ -95,6 +105,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Apply dark or light drawing colours to the canvas."""
         self.dark_mode = enabled
         self.init = False
+        self.Refresh()
+
+    def set_colour_blind_mode(self, enabled):
+        """Apply colour-blind-safe signal colours to the canvas."""
+        self.colour_blind_mode = enabled
         self.Refresh()
 
     def theme_colour(self, key):
@@ -872,6 +887,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def trace_colour_for_monitor(self, device_id, output_id, index):
         """Return a trace colour, with clocks highlighted in green."""
+        if self.colour_blind_mode:
+            colours = self.colour_blind_trace_colours
+            return colours[index % len(colours)]
+
         device = self.devices.get_device(device_id)
         if device is not None and device.device_kind == self.devices.CLOCK:
             return (0.20, 0.55, 0.25)
@@ -1082,6 +1101,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def signal_colour(self, signal):
         """Return colour for a signal level."""
+        if self.colour_blind_mode:
+            if signal in [self.devices.HIGH, self.devices.RISING]:
+                return (0.00, 0.45, 0.70)
+            if signal in [self.devices.LOW, self.devices.FALLING]:
+                return (0.90, 0.62, 0.00)
+
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return (0.86, 0.08, 0.08)
         if signal in [self.devices.LOW, self.devices.FALLING]:
@@ -1285,6 +1310,7 @@ class Gui(wx.Frame):
         self.current_language = "en"
         self.translations = self.build_translations()
         self.dark_mode = False
+        self.colour_blind_mode = False
         self.controller = GuiController(names, devices, network, monitors)
         self.default_monitor_keys = []
         self.default_monitor_traces = {}
@@ -1329,6 +1355,8 @@ class Gui(wx.Frame):
                 "language": "Language",
                 "dark_mode": "Dark Mode",
                 "light_mode": "Light Mode",
+                "colour_blind_mode": "Colour Blind",
+                "standard_colours": "Standard Colours",
                 "help": "Help",
                 "switches": "Switches",
                 "monitors": "Monitors",
@@ -1346,6 +1374,8 @@ class Gui(wx.Frame):
                 "language_changed": "Language changed.",
                 "dark_mode_enabled": "Dark mode enabled.",
                 "light_mode_enabled": "Light mode enabled.",
+                "colour_blind_enabled": "Colour-blind mode enabled.",
+                "colour_blind_disabled": "Standard colours enabled.",
                 "help_title": "Interface Help",
                 "about_title": "About Logsim",
                 "about_text": (
@@ -1390,6 +1420,8 @@ class Gui(wx.Frame):
                 "language": "Langue",
                 "dark_mode": "Mode sombre",
                 "light_mode": "Mode clair",
+                "colour_blind_mode": "Daltonien",
+                "standard_colours": "Couleurs standard",
                 "help": "Aide",
                 "switches": "Interrupteurs",
                 "monitors": "Moniteurs",
@@ -1407,6 +1439,8 @@ class Gui(wx.Frame):
                 "language_changed": "Langue modifiee.",
                 "dark_mode_enabled": "Mode sombre active.",
                 "light_mode_enabled": "Mode clair active.",
+                "colour_blind_enabled": "Mode daltonien active.",
+                "colour_blind_disabled": "Couleurs standard activees.",
                 "help_title": "Aide interface",
                 "about_title": "A propos de Logsim",
                 "about_text": (
@@ -1448,6 +1482,8 @@ class Gui(wx.Frame):
                 "language": "Idioma",
                 "dark_mode": "Modo oscuro",
                 "light_mode": "Modo claro",
+                "colour_blind_mode": "Daltonismo",
+                "standard_colours": "Colores estandar",
                 "help": "Ayuda",
                 "switches": "Interruptores",
                 "monitors": "Monitores",
@@ -1465,6 +1501,8 @@ class Gui(wx.Frame):
                 "language_changed": "Idioma cambiado.",
                 "dark_mode_enabled": "Modo oscuro activado.",
                 "light_mode_enabled": "Modo claro activado.",
+                "colour_blind_enabled": "Modo daltonismo activado.",
+                "colour_blind_disabled": "Colores estandar activados.",
                 "help_title": "Ayuda de interfaz",
                 "about_title": "Acerca de Logsim",
                 "about_text": (
@@ -1506,6 +1544,8 @@ class Gui(wx.Frame):
                 "language": "Sprache",
                 "dark_mode": "Dunkelmodus",
                 "light_mode": "Hellmodus",
+                "colour_blind_mode": "Farbenblind",
+                "standard_colours": "Standardfarben",
                 "help": "Hilfe",
                 "switches": "Schalter",
                 "monitors": "Monitore",
@@ -1523,6 +1563,8 @@ class Gui(wx.Frame):
                 "language_changed": "Sprache geandert.",
                 "dark_mode_enabled": "Dunkelmodus aktiviert.",
                 "light_mode_enabled": "Hellmodus aktiviert.",
+                "colour_blind_enabled": "Farbenblind-Modus aktiviert.",
+                "colour_blind_disabled": "Standardfarben aktiviert.",
                 "help_title": "Hilfe",
                 "about_title": "Info zu Logsim",
                 "about_text": (
@@ -1554,6 +1596,12 @@ class Gui(wx.Frame):
             return self.t("light_mode")
         return self.t("dark_mode")
 
+    def colour_blind_mode_label(self):
+        """Return the colour-mode toggle label for the current state."""
+        if self.colour_blind_mode:
+            return self.t("standard_colours")
+        return self.t("colour_blind_mode")
+
     def gui_theme(self):
         """Return wx colours for the current interface theme."""
         if self.dark_mode:
@@ -1579,6 +1627,7 @@ class Gui(wx.Frame):
         theme = self.gui_theme()
         self.SetBackgroundColour(theme["background"])
         self.canvas.set_dark_mode(self.dark_mode)
+        self.canvas.set_colour_blind_mode(self.colour_blind_mode)
 
         text_controls = [
             self.cycles_label, self.speed_label, self.switch_label,
@@ -1590,9 +1639,10 @@ class Gui(wx.Frame):
             self.run_button, self.continue_button, self.step_button,
             self.auto_run_button, self.open_button, self.save_button,
             self.export_circuit_button, self.export_scope_button,
-            self.language_button, self.dark_mode_button, self.help_button,
-            self.set_switch_button, self.add_monitor_button,
-            self.remove_monitor_button, self.reset_view_button,
+            self.language_button, self.dark_mode_button,
+            self.colour_blind_button, self.help_button, self.set_switch_button,
+            self.add_monitor_button, self.remove_monitor_button,
+            self.reset_view_button,
         ]
         fields = [
             self.cycles_spin, self.speed_slider, self.switch_choice,
@@ -1614,6 +1664,7 @@ class Gui(wx.Frame):
 
         self.log_text.SetBackgroundColour(theme["log"])
         self.dark_mode_button.SetLabel(self.dark_mode_label())
+        self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
         self.Refresh()
         self.Layout()
 
@@ -1687,6 +1738,9 @@ class Gui(wx.Frame):
         )
         self.dark_mode_button = wx.Button(
             self, wx.ID_ANY, self.dark_mode_label()
+        )
+        self.colour_blind_button = wx.Button(
+            self, wx.ID_ANY, self.colour_blind_mode_label()
         )
         self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
@@ -1785,6 +1839,8 @@ class Gui(wx.Frame):
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.dark_mode_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.colour_blind_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.help_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
@@ -1846,6 +1902,9 @@ class Gui(wx.Frame):
         )
         self.dark_mode_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_dark_mode_button()
+        )
+        self.colour_blind_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_colour_blind_button()
         )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
@@ -1917,6 +1976,15 @@ class Gui(wx.Frame):
         else:
             self.set_status(self.t("light_mode_enabled"))
 
+    def on_colour_blind_button(self):
+        """Toggle colour-blind-safe signal colours."""
+        self.colour_blind_mode = not self.colour_blind_mode
+        self.apply_theme()
+        if self.colour_blind_mode:
+            self.set_status(self.t("colour_blind_enabled"))
+        else:
+            self.set_status(self.t("colour_blind_disabled"))
+
     def update_language_labels(self):
         """Apply the current language to visible menus and controls."""
         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
@@ -1945,6 +2013,7 @@ class Gui(wx.Frame):
         self.export_scope_button.SetLabel(self.t("export_scope"))
         self.language_button.SetLabel(self.t("language"))
         self.dark_mode_button.SetLabel(self.dark_mode_label())
+        self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
         self.help_button.SetLabel(self.t("help"))
 
         self.switch_box.SetLabel(self.t("switches"))
