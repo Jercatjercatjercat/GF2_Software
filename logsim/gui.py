@@ -56,6 +56,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_offset = 0
         self.scope_geometry = {}
         self.follow_latest_cycles = True
+        self.dark_mode = False
         self.last_circuit_bounds = None
         self.last_scope_bounds = None
 
@@ -90,12 +91,87 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.init = False
         self.Refresh()
 
+    def set_dark_mode(self, enabled):
+        """Apply dark or light drawing colours to the canvas."""
+        self.dark_mode = enabled
+        self.init = False
+        self.Refresh()
+
+    def theme_colour(self, key):
+        """Return an OpenGL colour from the current canvas theme."""
+        light_colours = {
+            "canvas_bg": (0.96, 0.97, 0.98),
+            "grid": (0.90, 0.92, 0.94),
+            "text": (0.02, 0.03, 0.04),
+            "subtle_text": (0.34, 0.39, 0.47),
+            "circuit_bg": (0.98, 0.98, 0.95),
+            "circuit_border": (0.70, 0.70, 0.62),
+            "device_border": (0.38, 0.42, 0.48),
+            "switch_fill": (1.00, 0.96, 0.76),
+            "clock_fill": (0.80, 0.94, 0.82),
+            "dtype_fill": (0.83, 0.91, 1.00),
+            "gate_fill": (0.95, 0.95, 1.00),
+            "scope_bg": (0.78, 0.78, 0.78),
+            "scope_border": (0.36, 0.36, 0.38),
+            "scope_header": (0.70, 0.80, 0.91),
+            "scope_header_border": (0.48, 0.48, 0.52),
+            "scope_icon": (0.82, 0.90, 0.98),
+            "scope_icon_border": (0.35, 0.48, 0.64),
+            "grid_major": (0.70, 0.70, 0.74),
+            "grid_minor": (0.86, 0.86, 0.88),
+            "grid_row": (0.90, 0.90, 0.91),
+            "level_mark": (0.82, 0.82, 0.84),
+            "level_guide": (0.92, 0.92, 0.93),
+            "scrollbar_track": (0.88, 0.88, 0.88),
+            "scrollbar_step": (0.86, 0.86, 0.86),
+            "scrollbar_border": (0.62, 0.62, 0.64),
+            "scrollbar_thumb": (0.72, 0.72, 0.74),
+            "scrollbar_arrow": (0.26, 0.26, 0.28),
+            "axis": (0.22, 0.22, 0.24),
+            "blank_signal": (0.70, 0.70, 0.70),
+            "pin_border": (0.24, 0.24, 0.24),
+        }
+        dark_colours = {
+            "canvas_bg": (0.08, 0.10, 0.13),
+            "grid": (0.16, 0.19, 0.24),
+            "text": (0.90, 0.93, 0.96),
+            "subtle_text": (0.66, 0.72, 0.80),
+            "circuit_bg": (0.13, 0.15, 0.18),
+            "circuit_border": (0.34, 0.39, 0.46),
+            "device_border": (0.55, 0.61, 0.70),
+            "switch_fill": (0.30, 0.27, 0.12),
+            "clock_fill": (0.12, 0.27, 0.18),
+            "dtype_fill": (0.13, 0.22, 0.34),
+            "gate_fill": (0.19, 0.20, 0.29),
+            "scope_bg": (0.16, 0.18, 0.21),
+            "scope_border": (0.43, 0.48, 0.56),
+            "scope_header": (0.18, 0.28, 0.39),
+            "scope_header_border": (0.42, 0.51, 0.62),
+            "scope_icon": (0.20, 0.31, 0.43),
+            "scope_icon_border": (0.55, 0.67, 0.82),
+            "grid_major": (0.35, 0.40, 0.48),
+            "grid_minor": (0.25, 0.29, 0.35),
+            "grid_row": (0.23, 0.27, 0.32),
+            "level_mark": (0.44, 0.49, 0.57),
+            "level_guide": (0.28, 0.32, 0.38),
+            "scrollbar_track": (0.24, 0.27, 0.32),
+            "scrollbar_step": (0.20, 0.23, 0.28),
+            "scrollbar_border": (0.46, 0.51, 0.58),
+            "scrollbar_thumb": (0.46, 0.50, 0.58),
+            "scrollbar_arrow": (0.82, 0.86, 0.90),
+            "axis": (0.86, 0.89, 0.92),
+            "blank_signal": (0.56, 0.60, 0.66),
+            "pin_border": (0.78, 0.82, 0.88),
+        }
+        colours = dark_colours if self.dark_mode else light_colours
+        return colours[key]
+
     def init_gl(self):
         """Configure the OpenGL projection for the current canvas size."""
         size = self.GetClientSize()
         self.SetCurrent(self.context)
         GL.glDrawBuffer(GL.GL_BACK)
-        GL.glClearColor(0.96, 0.97, 0.98, 0.0)
+        GL.glClearColor(*self.theme_colour("canvas_bg"), 0.0)
         GL.glViewport(0, 0, size.width, size.height)
         GL.glMatrixMode(GL.GL_PROJECTION)
         GL.glLoadIdentity()
@@ -299,7 +375,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def draw_canvas_grid(self, size):
         """Draw a faint simulator-style workspace grid."""
-        self.set_colour(0.90, 0.92, 0.94)
+        self.set_colour(*self.theme_colour("grid"))
         GL.glBegin(GL.GL_LINES)
         for x_pos in range(0, size.width + 1, 24):
             GL.glVertex2f(x_pos, 0)
@@ -312,7 +388,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def draw_circuit_overview(self, bounds):
         """Draw a compact block diagram of the parsed circuit."""
         x_pos, y_pos, width, height = bounds
-        self.draw_rectangle(bounds, (0.98, 0.98, 0.95), (0.70, 0.70, 0.62))
+        self.draw_rectangle(
+            bounds,
+            self.theme_colour("circuit_bg"),
+            self.theme_colour("circuit_border"),
+        )
         self.render_text("Circuit overview", x_pos + 10, y_pos + height - 20)
 
         positions = self.build_device_positions(bounds)
@@ -486,10 +566,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         display_name = self.truncate_label(str(name), max_chars)
         display_kind = self.truncate_label(str(kind), max_chars)
 
-        self.draw_rectangle(bounds, fill_colour, (0.38, 0.42, 0.48))
+        self.draw_rectangle(bounds, fill_colour, self.theme_colour("device_border"))
         self.render_text(display_name, x_pos + 8, y_pos + height - 14)
         self.render_text(
-            display_kind, x_pos + 8, y_pos + 8, (0.34, 0.39, 0.47)
+            display_kind, x_pos + 8, y_pos + 8,
+            self.theme_colour("subtle_text")
         )
 
         for input_id in self.sorted_port_ids(device.inputs):
@@ -504,12 +585,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def device_fill_colour(self, device):
         """Return a fill colour for a device type."""
         if device.device_kind == self.devices.SWITCH:
-            return (1.00, 0.96, 0.76)
+            return self.theme_colour("switch_fill")
         if device.device_kind == self.devices.CLOCK:
-            return (0.80, 0.94, 0.82)
+            return self.theme_colour("clock_fill")
         if device.device_kind == self.devices.D_TYPE:
-            return (0.83, 0.91, 1.00)
-        return (0.95, 0.95, 1.00)
+            return self.theme_colour("dtype_fill")
+        return self.theme_colour("gate_fill")
 
     def input_pin(self, bounds, device, input_id):
         """Return the position of an input pin."""
@@ -558,7 +639,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         scope_x, scope_y, scope_width, scope_height = scope_bounds
 
         self.draw_rectangle(
-            scope_bounds, (0.78, 0.78, 0.78), (0.36, 0.36, 0.38)
+            scope_bounds,
+            self.theme_colour("scope_bg"),
+            self.theme_colour("scope_border"),
         )
         self.draw_scope_header(scope_bounds)
 
@@ -638,12 +721,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Draw the oscilloscope title strip."""
         x_pos, y_pos, width, height = bounds
         header_bounds = (x_pos, y_pos + height - 28, width, 28)
-        self.draw_rectangle(header_bounds, (0.70, 0.80, 0.91),
-                            (0.48, 0.48, 0.52))
+        self.draw_rectangle(
+            header_bounds,
+            self.theme_colour("scope_header"),
+            self.theme_colour("scope_header_border"),
+        )
         self.render_text("Oscilloscope", x_pos + 30, y_pos + height - 18)
         self.draw_rectangle(
             (x_pos + 9, y_pos + height - 21, 12, 12),
-            (0.82, 0.90, 0.98), (0.35, 0.48, 0.64)
+            self.theme_colour("scope_icon"),
+            self.theme_colour("scope_icon_border"),
         )
 
     def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
@@ -651,15 +738,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glBegin(GL.GL_LINES)
         for cycle in range(cycle_count + 1):
             if cycle % 5 == 0:
-                self.set_colour(0.70, 0.70, 0.74)
+                self.set_colour(*self.theme_colour("grid_major"))
             else:
-                self.set_colour(0.86, 0.86, 0.88)
+                self.set_colour(*self.theme_colour("grid_minor"))
             x_pos = plot_x + cycle * self.cycle_width
             GL.glVertex2f(x_pos, plot_y)
             GL.glVertex2f(x_pos, plot_y + height)
 
         for row in range(0, int(height), 24):
-            self.set_colour(0.90, 0.90, 0.91)
+            self.set_colour(*self.theme_colour("grid_row"))
             GL.glVertex2f(plot_x, plot_y + row)
             GL.glVertex2f(plot_x + width, plot_y + row)
         GL.glEnd()
@@ -695,7 +782,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         high_y = row_base + self.high_offset
         low_y = row_base + self.low_offset
 
-        self.set_colour(0.82, 0.82, 0.84)
+        self.set_colour(*self.theme_colour("level_mark"))
         GL.glBegin(GL.GL_LINES)
         GL.glVertex2f(plot_x, high_y)
         GL.glVertex2f(plot_x + 8, high_y)
@@ -705,12 +792,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         if row_gap >= 18:
             self.render_text("1", plot_x - 18, high_y - 4,
-                             (0.34, 0.34, 0.36))
+                             self.theme_colour("subtle_text"))
             self.render_text("0", plot_x - 18, low_y - 4,
-                             (0.34, 0.34, 0.36))
+                             self.theme_colour("subtle_text"))
 
         if row_gap >= 26:
-            self.set_colour(0.92, 0.92, 0.93)
+            self.set_colour(*self.theme_colour("level_guide"))
             GL.glBegin(GL.GL_LINES)
             GL.glVertex2f(plot_x, high_y)
             GL.glVertex2f(plot_x + 40, high_y)
@@ -796,7 +883,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Draw a blank signal interval for monitors added mid-run."""
         mid_y = row_base + (self.high_offset + self.low_offset) / 2
         dash_width = 5
-        self.set_colour(0.70, 0.70, 0.70)
+        self.set_colour(*self.theme_colour("blank_signal"))
         GL.glBegin(GL.GL_LINES)
         while x_start < x_end:
             GL.glVertex2f(x_start, mid_y)
@@ -819,8 +906,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         vertical_track = (right_x, plot_y, 10, plot_height)
         self.draw_rectangle(
-            vertical_track, (0.88, 0.88, 0.88),
-            (0.62, 0.62, 0.64)
+            vertical_track,
+            self.theme_colour("scrollbar_track"),
+            self.theme_colour("scrollbar_border"),
         )
         if total_rows > visible_rows:
             thumb_height = max(28, plot_height * visible_rows / total_rows)
@@ -832,7 +920,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         vertical_thumb = (right_x + 1, thumb_y, 8, thumb_height)
         self.draw_rectangle(
             vertical_thumb,
-            (0.72, 0.72, 0.74), (0.48, 0.48, 0.50)
+            self.theme_colour("scrollbar_thumb"),
+            self.theme_colour("scrollbar_border"),
         )
 
         bar_y = y_pos + 34
@@ -840,16 +929,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         bar_width = plot_width
         horizontal_track = (bar_x, bar_y, bar_width, 13)
         self.draw_rectangle(
-            horizontal_track, (0.88, 0.88, 0.88),
-            (0.62, 0.62, 0.64)
+            horizontal_track,
+            self.theme_colour("scrollbar_track"),
+            self.theme_colour("scrollbar_border"),
         )
         self.draw_rectangle(
-            (bar_x - 12, bar_y, 12, 13), (0.86, 0.86, 0.86),
-            (0.62, 0.62, 0.64)
+            (bar_x - 12, bar_y, 12, 13),
+            self.theme_colour("scrollbar_step"),
+            self.theme_colour("scrollbar_border"),
         )
         self.draw_rectangle(
-            (bar_x + bar_width, bar_y, 12, 13), (0.86, 0.86, 0.86),
-            (0.62, 0.62, 0.64)
+            (bar_x + bar_width, bar_y, 12, 13),
+            self.theme_colour("scrollbar_step"),
+            self.theme_colour("scrollbar_border"),
         )
 
         if max_cycles > cycle_count:
@@ -861,8 +953,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             thumb_x = bar_x + (bar_width - thumb_width) / 2
         horizontal_thumb = (thumb_x, bar_y + 2, thumb_width, 9)
         self.draw_rectangle(
-            horizontal_thumb, (0.72, 0.72, 0.74),
-            (0.48, 0.48, 0.50)
+            horizontal_thumb,
+            self.theme_colour("scrollbar_thumb"),
+            self.theme_colour("scrollbar_border"),
         )
         self.scope_geometry.update({
             "vertical_track": vertical_track,
@@ -870,14 +963,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "horizontal_track": horizontal_track,
             "horizontal_thumb": horizontal_thumb,
         })
-        self.render_text("<", bar_x - 9, bar_y + 2, (0.26, 0.26, 0.28))
+        self.render_text(
+            "<", bar_x - 9, bar_y + 2,
+            self.theme_colour("scrollbar_arrow")
+        )
         self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
-                         (0.26, 0.26, 0.28))
+                         self.theme_colour("scrollbar_arrow"))
 
     def draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle,
                         max_cycles):
         """Draw cycle tick labels along the bottom of the scope."""
-        self.set_colour(0.22, 0.22, 0.24)
+        self.set_colour(*self.theme_colour("axis"))
         GL.glBegin(GL.GL_LINES)
         GL.glVertex2f(plot_x, plot_y)
         GL.glVertex2f(plot_x + cycle_count * self.cycle_width, plot_y)
@@ -897,10 +993,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         last_cycle = min(last_cycle, max(max_cycles - 1, 0))
         self.render_text(
             "Cycles shown: " + str(first_cycle) + "-" + str(last_cycle),
-            plot_x + 28, plot_y - 76, (0.20, 0.20, 0.22)
+            plot_x + 28, plot_y - 76, self.theme_colour("axis")
         )
         self.render_text(
-            "Level", plot_x - 38, plot_y - 76, (0.34, 0.34, 0.36)
+            "Level", plot_x - 38, plot_y - 76,
+            self.theme_colour("subtle_text")
         )
 
     def max_recorded_cycles(self, monitor_items):
@@ -969,7 +1066,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 y_pos + radius * math.sin(angle),
             )
         GL.glEnd()
-        self.set_colour(0.24, 0.24, 0.24)
+        self.set_colour(*self.theme_colour("pin_border"))
         GL.glBegin(GL.GL_LINE_LOOP)
         for index in range(24):
             angle = 2 * 3.141592653589793 * index / 24
@@ -988,6 +1085,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return (0.86, 0.08, 0.08)
         if signal in [self.devices.LOW, self.devices.FALLING]:
+            if self.dark_mode:
+                return (0.78, 0.82, 0.88)
             return (0.28, 0.28, 0.30)
         return (0.70, 0.70, 0.70)
 
@@ -1154,8 +1253,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Clamp a number between two bounds."""
         return max(minimum, min(value, maximum))
 
-    def render_text(self, text, x_pos, y_pos, colour=(0.0, 0.0, 0.0)):
+    def render_text(self, text, x_pos, y_pos, colour=None):
         """Draw bitmap text at the given position."""
+        if colour is None:
+            colour = self.theme_colour("text")
         self.set_colour(*colour)
         GL.glRasterPos2f(x_pos, y_pos)
         font = GLUT.GLUT_BITMAP_HELVETICA_12
@@ -1183,6 +1284,7 @@ class Gui(wx.Frame):
         self.path = path
         self.current_language = "en"
         self.translations = self.build_translations()
+        self.dark_mode = False
         self.controller = GuiController(names, devices, network, monitors)
         self.default_monitor_keys = []
         self.default_monitor_traces = {}
@@ -1194,6 +1296,7 @@ class Gui(wx.Frame):
         self.create_controls()
         self.configure_layout()
         self.bind_events()
+        self.apply_theme()
         self.remember_default_monitors()
         self.refresh_choices()
         self.set_status("Loaded " + path)
@@ -1224,6 +1327,8 @@ class Gui(wx.Frame):
                 "export_circuit": "Export Circuit",
                 "export_scope": "Export Scope",
                 "language": "Language",
+                "dark_mode": "Dark Mode",
+                "light_mode": "Light Mode",
                 "help": "Help",
                 "switches": "Switches",
                 "monitors": "Monitors",
@@ -1239,6 +1344,8 @@ class Gui(wx.Frame):
                 "reset_view": "Reset View",
                 "status_prefix": "Status",
                 "language_changed": "Language changed.",
+                "dark_mode_enabled": "Dark mode enabled.",
+                "light_mode_enabled": "Light mode enabled.",
                 "help_title": "Interface Help",
                 "about_title": "About Logsim",
                 "about_text": (
@@ -1281,6 +1388,8 @@ class Gui(wx.Frame):
                 "export_circuit": "Exporter circuit",
                 "export_scope": "Exporter scope",
                 "language": "Langue",
+                "dark_mode": "Mode sombre",
+                "light_mode": "Mode clair",
                 "help": "Aide",
                 "switches": "Interrupteurs",
                 "monitors": "Moniteurs",
@@ -1296,6 +1405,8 @@ class Gui(wx.Frame):
                 "reset_view": "Reinitialiser vue",
                 "status_prefix": "Statut",
                 "language_changed": "Langue modifiee.",
+                "dark_mode_enabled": "Mode sombre active.",
+                "light_mode_enabled": "Mode clair active.",
                 "help_title": "Aide interface",
                 "about_title": "A propos de Logsim",
                 "about_text": (
@@ -1335,6 +1446,8 @@ class Gui(wx.Frame):
                 "export_circuit": "Exportar circuito",
                 "export_scope": "Exportar scope",
                 "language": "Idioma",
+                "dark_mode": "Modo oscuro",
+                "light_mode": "Modo claro",
                 "help": "Ayuda",
                 "switches": "Interruptores",
                 "monitors": "Monitores",
@@ -1350,6 +1463,8 @@ class Gui(wx.Frame):
                 "reset_view": "Reiniciar vista",
                 "status_prefix": "Estado",
                 "language_changed": "Idioma cambiado.",
+                "dark_mode_enabled": "Modo oscuro activado.",
+                "light_mode_enabled": "Modo claro activado.",
                 "help_title": "Ayuda de interfaz",
                 "about_title": "Acerca de Logsim",
                 "about_text": (
@@ -1389,6 +1504,8 @@ class Gui(wx.Frame):
                 "export_circuit": "Schaltung exportieren",
                 "export_scope": "Scope exportieren",
                 "language": "Sprache",
+                "dark_mode": "Dunkelmodus",
+                "light_mode": "Hellmodus",
                 "help": "Hilfe",
                 "switches": "Schalter",
                 "monitors": "Monitore",
@@ -1404,6 +1521,8 @@ class Gui(wx.Frame):
                 "reset_view": "Ansicht reset",
                 "status_prefix": "Status",
                 "language_changed": "Sprache geandert.",
+                "dark_mode_enabled": "Dunkelmodus aktiviert.",
+                "light_mode_enabled": "Hellmodus aktiviert.",
                 "help_title": "Hilfe",
                 "about_title": "Info zu Logsim",
                 "about_text": (
@@ -1428,6 +1547,75 @@ class Gui(wx.Frame):
         """Translate a UI label for the current language."""
         language = self.translations.get(self.current_language, {})
         return language.get(key, self.translations["en"].get(key, key))
+
+    def dark_mode_label(self):
+        """Return the mode toggle label for the current state."""
+        if self.dark_mode:
+            return self.t("light_mode")
+        return self.t("dark_mode")
+
+    def gui_theme(self):
+        """Return wx colours for the current interface theme."""
+        if self.dark_mode:
+            return {
+                "background": wx.Colour(28, 32, 38),
+                "panel": wx.Colour(34, 39, 46),
+                "control": wx.Colour(43, 49, 58),
+                "text": wx.Colour(231, 235, 240),
+                "muted": wx.Colour(184, 193, 204),
+                "log": wx.Colour(24, 28, 34),
+            }
+        return {
+            "background": wx.Colour(245, 247, 250),
+            "panel": wx.Colour(245, 247, 250),
+            "control": wx.Colour(255, 255, 255),
+            "text": wx.Colour(22, 26, 32),
+            "muted": wx.Colour(80, 86, 96),
+            "log": wx.Colour(250, 251, 253),
+        }
+
+    def apply_theme(self):
+        """Apply light or dark colours to wx controls and the canvas."""
+        theme = self.gui_theme()
+        self.SetBackgroundColour(theme["background"])
+        self.canvas.set_dark_mode(self.dark_mode)
+
+        text_controls = [
+            self.cycles_label, self.speed_label, self.switch_label,
+            self.add_monitor_label, self.remove_monitor_label,
+            self.switch_box, self.monitor_box, self.readings_box,
+            self.log_box,
+        ]
+        buttons = [
+            self.run_button, self.continue_button, self.step_button,
+            self.auto_run_button, self.open_button, self.save_button,
+            self.export_circuit_button, self.export_scope_button,
+            self.language_button, self.dark_mode_button, self.help_button,
+            self.set_switch_button, self.add_monitor_button,
+            self.remove_monitor_button, self.reset_view_button,
+        ]
+        fields = [
+            self.cycles_spin, self.speed_slider, self.switch_choice,
+            self.switch_value, self.add_monitor_choice,
+            self.remove_monitor_choice, self.readings_list, self.log_text,
+        ]
+
+        for control in text_controls:
+            control.SetForegroundColour(theme["text"])
+            control.SetBackgroundColour(theme["background"])
+
+        for control in buttons:
+            control.SetForegroundColour(theme["text"])
+            control.SetBackgroundColour(theme["control"])
+
+        for control in fields:
+            control.SetForegroundColour(theme["text"])
+            control.SetBackgroundColour(theme["control"])
+
+        self.log_text.SetBackgroundColour(theme["log"])
+        self.dark_mode_button.SetLabel(self.dark_mode_label())
+        self.Refresh()
+        self.Layout()
 
     def configure_menu(self):
         """Create the File and Help menus."""
@@ -1496,6 +1684,9 @@ class Gui(wx.Frame):
         )
         self.language_button = wx.Button(
             self, wx.ID_ANY, self.t("language")
+        )
+        self.dark_mode_button = wx.Button(
+            self, wx.ID_ANY, self.dark_mode_label()
         )
         self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
@@ -1592,6 +1783,8 @@ class Gui(wx.Frame):
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.language_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.dark_mode_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.help_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
@@ -1650,6 +1843,9 @@ class Gui(wx.Frame):
         )
         self.language_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_language_button()
+        )
+        self.dark_mode_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_dark_mode_button()
         )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
@@ -1712,6 +1908,15 @@ class Gui(wx.Frame):
         self.update_language_labels()
         self.set_status(self.t("language_changed"))
 
+    def on_dark_mode_button(self):
+        """Toggle between light and dark interface themes."""
+        self.dark_mode = not self.dark_mode
+        self.apply_theme()
+        if self.dark_mode:
+            self.set_status(self.t("dark_mode_enabled"))
+        else:
+            self.set_status(self.t("light_mode_enabled"))
+
     def update_language_labels(self):
         """Apply the current language to visible menus and controls."""
         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
@@ -1739,6 +1944,7 @@ class Gui(wx.Frame):
         self.export_circuit_button.SetLabel(self.t("export_circuit"))
         self.export_scope_button.SetLabel(self.t("export_scope"))
         self.language_button.SetLabel(self.t("language"))
+        self.dark_mode_button.SetLabel(self.dark_mode_label())
         self.help_button.SetLabel(self.t("help"))
 
         self.switch_box.SetLabel(self.t("switches"))
@@ -1753,6 +1959,7 @@ class Gui(wx.Frame):
         self.remove_monitor_label.SetLabel(self.t("current_monitors"))
         self.remove_monitor_button.SetLabel(self.t("remove_monitor"))
         self.reset_view_button.SetLabel(self.t("reset_view"))
+        self.apply_theme()
         self.Layout()
 
     def on_close(self, event):
