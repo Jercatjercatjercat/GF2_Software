@@ -15,6 +15,8 @@ EXAMPLE_FILES = [
     Path("examples/example1_mixed_combinational.txt"),
     Path("examples/example2_clocked_dtype.txt"),
     Path("examples/example3_flip_flop_switch.txt"),
+    Path("examples/example4_full_adder.txt"),
+    Path("examples/example5_gui_stress_multi_input.txt"),
 ]
 EXAMPLE3_PATH = Path("examples/example3_flip_flop_switch.txt")
 
