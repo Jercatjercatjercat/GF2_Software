@@ -50,6 +50,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_mouse_x = 0
         self.last_mouse_y = 0
         self.zoom = 1.0
+        self.circuit_scroll_x = 0
+        self.circuit_scroll_y = 0
+        self.circuit_drag_mode = None
+        self.circuit_drag_offset = 0
+        self.circuit_geometry = {}
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.scope_drag_mode = None
@@ -94,6 +99,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.pan_x = 0
         self.pan_y = 0
         self.zoom = 1.0
+        self.circuit_scroll_x = 0
+        self.circuit_scroll_y = 0
+        self.circuit_drag_mode = None
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.scope_drag_mode = None
@@ -410,12 +418,45 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         )
         self.render_text("Circuit overview", x_pos + 10, y_pos + height - 20)
 
-        positions = self.build_device_positions(bounds)
+        view_bounds = (x_pos + 10, y_pos + 26, width - 32, height - 64)
+        view_x, view_y, view_width, view_height = view_bounds
+        if view_width <= 0 or view_height <= 0:
+            return
+
+        content_width, content_height = self.circuit_content_size(
+            view_width, view_height
+        )
+        max_scroll_x = max(content_width - view_width, 0)
+        max_scroll_y = max(content_height - view_height, 0)
+        self.circuit_scroll_x = self.clamp(
+            self.circuit_scroll_x, 0, max_scroll_x
+        )
+        self.circuit_scroll_y = self.clamp(
+            self.circuit_scroll_y, 0, max_scroll_y
+        )
+        content_bounds = (
+            view_x - self.circuit_scroll_x,
+            view_y + view_height - content_height + self.circuit_scroll_y,
+            content_width,
+            content_height,
+        )
+        self.circuit_geometry = {
+            "view": view_bounds,
+            "content_width": content_width,
+            "content_height": content_height,
+            "max_scroll_x": max_scroll_x,
+            "max_scroll_y": max_scroll_y,
+        }
+
+        self.begin_scissor(view_bounds)
+        positions = self.build_device_positions(content_bounds)
         self.draw_connections(positions)
 
         for device in self.devices.devices_list:
             if device.device_id in positions:
                 self.draw_device_node(device, positions[device.device_id])
+        self.end_scissor()
+        self.draw_circuit_scrollbars(view_bounds)
 
     def build_device_positions(self, bounds):
         """Return a simple layered layout for all devices."""
@@ -432,7 +473,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             len(str(self.devices.names.get_name_string(device.device_id)))
             for device in self.devices.devices_list
         )
-        block_width = min(148, max(112, longest_name * 8 + 24))
+        block_width = min(180, max(112, longest_name * 8 + 24))
         block_height = 34
         usable_width = max(width - block_width - 90, 1)
         top_padding = 42
@@ -462,6 +503,97 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 )
 
         return positions
+
+    def circuit_content_size(self, view_width, view_height):
+        """Return virtual circuit dimensions for large diagrams."""
+        layers = self.calculate_device_layers()
+        layer_counts = {}
+        for device in self.devices.devices_list:
+            layer = layers.get(device.device_id, 1)
+            layer_counts[layer] = layer_counts.get(layer, 0) + 1
+
+        layer_count = max(layer_counts, default=0) + 1
+        max_devices_in_layer = max(layer_counts.values(), default=1)
+        complex_circuit = (
+            len(self.devices.devices_list) > 12
+            or layer_count > 5
+            or max_devices_in_layer > 6
+        )
+        if not complex_circuit:
+            return view_width, view_height
+
+        longest_name = max(
+            len(str(self.devices.names.get_name_string(device.device_id)))
+            for device in self.devices.devices_list
+        )
+        block_width = min(180, max(112, longest_name * 8 + 24))
+        block_height = 34
+        layer_gap = 118
+        row_gap = 18
+
+        content_width = (
+            40 + layer_count * block_width
+            + max(0, layer_count - 1) * layer_gap
+        )
+        content_height = (
+            42 + max_devices_in_layer * block_height
+            + max(0, max_devices_in_layer - 1) * row_gap
+        )
+        return max(view_width, content_width), max(view_height, content_height)
+
+    def draw_circuit_scrollbars(self, view_bounds):
+        """Draw scrollbars for oversized circuit diagrams."""
+        view_x, view_y, view_width, view_height = view_bounds
+        content_width = self.circuit_geometry.get("content_width", view_width)
+        content_height = self.circuit_geometry.get("content_height", view_height)
+        max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+        max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+
+        if max_scroll_y > 0:
+            track = (view_x + view_width + 6, view_y, 10, view_height)
+            thumb_height = max(28, view_height * view_height / content_height)
+            usable = max(view_height - thumb_height, 1)
+            fraction = self.circuit_scroll_y / max_scroll_y
+            thumb_y = view_y + (1 - fraction) * usable
+            thumb = (track[0] + 1, thumb_y, 8, thumb_height)
+            self.draw_rectangle(
+                track,
+                self.theme_colour("scrollbar_track"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.draw_rectangle(
+                thumb,
+                self.theme_colour("scrollbar_thumb"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.circuit_geometry["vertical_track"] = track
+            self.circuit_geometry["vertical_thumb"] = thumb
+        else:
+            self.circuit_geometry["vertical_track"] = None
+            self.circuit_geometry["vertical_thumb"] = None
+
+        if max_scroll_x > 0:
+            track = (view_x, view_y - 16, view_width, 11)
+            thumb_width = max(44, view_width * view_width / content_width)
+            usable = max(view_width - thumb_width, 1)
+            fraction = self.circuit_scroll_x / max_scroll_x
+            thumb_x = view_x + fraction * usable
+            thumb = (thumb_x, track[1] + 1, thumb_width, 9)
+            self.draw_rectangle(
+                track,
+                self.theme_colour("scrollbar_track"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.draw_rectangle(
+                thumb,
+                self.theme_colour("scrollbar_thumb"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.circuit_geometry["horizontal_track"] = track
+            self.circuit_geometry["horizontal_thumb"] = thumb
+        else:
+            self.circuit_geometry["horizontal_track"] = None
+            self.circuit_geometry["horizontal_thumb"] = None
 
     def estimate_circuit_height(self):
         """Return enough circuit height to avoid stacked device overlap."""
@@ -668,16 +800,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
             return
 
-        max_cycles = self.max_recorded_cycles(monitor_items)
-        if max_cycles == 0:
-            self.render_text(
-                "Press Run to record signal traces.",
-                scope_x + 20,
-                scope_y + scope_height - 78,
-            )
-            self.draw_empty_scope_labels(scope_x, scope_y, monitor_items)
-            return
-
         label_width = self.calculate_scope_label_width(monitor_items)
         title_height = 28
         control_height = 8
@@ -693,6 +815,48 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         max_visible_cycles = max(
             10, int(plot_width // self.default_cycle_width)
         )
+        max_cycles = self.max_recorded_cycles(monitor_items)
+        if max_cycles == 0:
+            cycle_count = min(10, max_visible_cycles)
+            first_cycle = 0
+            self.scope_first_cycle = 0
+            self.cycle_width = plot_width / max(cycle_count, 1)
+
+            total_rows = len(monitor_items)
+            visible_rows = min(
+                total_rows, max(1, int(plot_height // self.row_height))
+            )
+            max_first_row = max(total_rows - visible_rows, 0)
+            self.scope_first_row = self.clamp(
+                self.scope_first_row, 0, max_first_row
+            )
+            visible_monitor_items = monitor_items[
+                self.scope_first_row:self.scope_first_row + visible_rows
+            ]
+
+            self.render_text(
+                "Press Run to record signal traces.",
+                scope_x + 20,
+                scope_y + scope_height - 50,
+                self.theme_colour("subtle_text"),
+            )
+            self.draw_scope_grid(
+                plot_x, plot_y, plot_width, plot_height, cycle_count
+            )
+            self.draw_scope_scrollbars(
+                scope_bounds, plot_x, plot_y, plot_width, plot_height,
+                first_cycle, cycle_count, cycle_count, self.scope_first_row,
+                total_rows, visible_rows
+            )
+            self.draw_empty_scope_rows(
+                scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
+                cycle_count, self.scope_first_row
+            )
+            self.draw_scope_axis(
+                plot_x, plot_y, cycle_count, first_cycle, cycle_count
+            )
+            return
+
         cycle_count = min(max(max_cycles, 10), max_visible_cycles)
         max_first_cycle = max(max_cycles - cycle_count, 0)
         if self.follow_latest_cycles:
@@ -820,29 +984,26 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(plot_x + 40, low_y)
             GL.glEnd()
 
-    def draw_empty_scope_labels(self, scope_x, scope_y, monitor_items):
-        """Show monitored signal names neatly before any run."""
-        max_rows = 8
-        for index, monitor_item in enumerate(monitor_items[:max_rows]):
+    def draw_empty_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+                              monitor_items, cycle_count, first_row):
+        """Draw aligned monitor rows before any signal data is recorded."""
+        row_gap = min(44, plot_height / max(len(monitor_items), 1))
+        blank_signals = [self.devices.BLANK] * cycle_count
+        for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), _ = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
-            colour = self.trace_colour_for_monitor(
-                device_id, output_id, index
-            )
-            self.render_text(
-                self.truncate_label(name, 18),
-                scope_x + 22,
-                scope_y + 156 - index * 20,
-                colour,
-            )
+            row_mid = plot_y + plot_height - 18 - index * row_gap
+            row_base = row_mid - self.high_offset / 2
 
-        if len(monitor_items) > max_rows:
-            self.render_text(
-                "+" + str(len(monitor_items) - max_rows) + " more",
-                scope_x + 22,
-                scope_y + 156 - max_rows * 20,
-                (0.36, 0.40, 0.46),
+            colour_index = first_row + index
+            colour = self.trace_colour_for_monitor(
+                device_id, output_id, colour_index
             )
+            self.render_text(name, label_x + 14, row_mid - 5, colour)
+            self.draw_signal_level_scale(
+                plot_x, plot_y, plot_height, row_base, row_gap
+            )
+            self.draw_digital_signal(plot_x, row_base, blank_signals, colour)
 
     def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
         """Draw one digital signal as a continuous square waveform."""
@@ -1053,6 +1214,29 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return label
         return label[:max_chars - 1] + "."
 
+    def begin_scissor(self, bounds):
+        """Clip OpenGL drawing to a canvas-space rectangle."""
+        x_pos, y_pos, width, height = bounds
+        size = self.GetClientSize()
+        x_pos = x_pos * self.zoom + self.pan_x
+        y_pos = y_pos * self.zoom + self.pan_y
+        width = width * self.zoom
+        height = height * self.zoom
+
+        x_pos = max(0, int(round(x_pos)))
+        y_pos = max(0, int(round(y_pos)))
+        width = min(int(round(width)), size.width - x_pos)
+        height = min(int(round(height)), size.height - y_pos)
+        if width <= 0 or height <= 0:
+            return
+
+        GL.glEnable(GL.GL_SCISSOR_TEST)
+        GL.glScissor(x_pos, y_pos, width, height)
+
+    def end_scissor(self):
+        """Disable OpenGL clipping."""
+        GL.glDisable(GL.GL_SCISSOR_TEST)
+
     def draw_rectangle(self, bounds, fill_colour, border_colour=None):
         """Draw a filled rectangle with an optional border."""
         x_pos, y_pos, width, height = bounds
@@ -1135,8 +1319,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            if self.start_circuit_scroll_drag(object_x, object_y):
+                return
             if self.start_scope_scroll_drag(object_x, object_y):
                 return
+
+        if event.Dragging() and self.circuit_drag_mode is not None:
+            self.update_circuit_scroll_drag(object_x, object_y)
+            self.Refresh()
+            return
 
         if event.Dragging() and self.scope_drag_mode is not None:
             self.update_scope_scroll_drag(object_x, object_y)
@@ -1144,6 +1335,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return
 
         if event.ButtonUp():
+            self.circuit_drag_mode = None
             self.scope_drag_mode = None
 
         if event.Dragging():
@@ -1155,6 +1347,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.Refresh()
 
         wheel_rotation = event.GetWheelRotation()
+        if wheel_rotation != 0 and self.scroll_circuit_view(
+            object_x, object_y, wheel_rotation
+        ):
+            self.Refresh()
+            return
+
         if wheel_rotation != 0 and self.scroll_scope_rows(
             object_x, object_y, wheel_rotation
         ):
@@ -1177,6 +1375,109 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y -= (self.zoom - old_zoom) * object_y
             self.init = False
             self.Refresh()
+
+    def start_circuit_scroll_drag(self, x_pos, y_pos):
+        """Start dragging a circuit scrollbar if one was clicked."""
+        vertical_track = self.circuit_geometry.get("vertical_track")
+        vertical_thumb = self.circuit_geometry.get("vertical_thumb")
+        horizontal_track = self.circuit_geometry.get("horizontal_track")
+        horizontal_thumb = self.circuit_geometry.get("horizontal_thumb")
+
+        if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+            self.circuit_drag_mode = "vertical"
+            self.circuit_drag_offset = y_pos - vertical_thumb[1]
+            return True
+
+        if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+            self.circuit_drag_mode = "vertical"
+            self.circuit_drag_offset = vertical_thumb[3] / 2
+            self.update_circuit_scroll_drag(x_pos, y_pos)
+            self.Refresh()
+            return True
+
+        if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+            self.circuit_drag_mode = "horizontal"
+            self.circuit_drag_offset = x_pos - horizontal_thumb[0]
+            return True
+
+        if horizontal_thumb and self.point_in_rect(
+            x_pos, y_pos, horizontal_track
+        ):
+            self.circuit_drag_mode = "horizontal"
+            self.circuit_drag_offset = horizontal_thumb[2] / 2
+            self.update_circuit_scroll_drag(x_pos, y_pos)
+            self.Refresh()
+            return True
+
+        return False
+
+    def update_circuit_scroll_drag(self, x_pos, y_pos):
+        """Update circuit viewport scroll while a scrollbar is dragged."""
+        if self.circuit_drag_mode == "vertical":
+            track = self.circuit_geometry.get("vertical_track")
+            thumb = self.circuit_geometry.get("vertical_thumb")
+            max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+            if not track or not thumb or max_scroll_y == 0:
+                return
+
+            _, track_y, _, track_height = track
+            _, _, _, thumb_height = thumb
+            usable = max(track_height - thumb_height, 1)
+            thumb_y = self.clamp(
+                y_pos - self.circuit_drag_offset, track_y, track_y + usable
+            )
+            fraction = 1 - ((thumb_y - track_y) / usable)
+            self.circuit_scroll_y = fraction * max_scroll_y
+
+        if self.circuit_drag_mode == "horizontal":
+            track = self.circuit_geometry.get("horizontal_track")
+            thumb = self.circuit_geometry.get("horizontal_thumb")
+            max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+            if not track or not thumb or max_scroll_x == 0:
+                return
+
+            track_x, _, track_width, _ = track
+            _, _, thumb_width, _ = thumb
+            usable = max(track_width - thumb_width, 1)
+            thumb_x = self.clamp(
+                x_pos - self.circuit_drag_offset, track_x, track_x + usable
+            )
+            fraction = (thumb_x - track_x) / usable
+            self.circuit_scroll_x = fraction * max_scroll_x
+
+    def scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
+        """Scroll the circuit overview when the wheel is over it."""
+        view = self.circuit_geometry.get("view")
+        if not self.point_in_rect(x_pos, y_pos, view):
+            return False
+
+        max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+        max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+        if max_scroll_x == 0 and max_scroll_y == 0:
+            return False
+
+        if wx.GetKeyState(wx.WXK_SHIFT) and max_scroll_x > 0:
+            step = -48 if wheel_rotation > 0 else 48
+            self.circuit_scroll_x = self.clamp(
+                self.circuit_scroll_x + step, 0, max_scroll_x
+            )
+            return True
+
+        if max_scroll_y > 0:
+            step = -48 if wheel_rotation > 0 else 48
+            self.circuit_scroll_y = self.clamp(
+                self.circuit_scroll_y + step, 0, max_scroll_y
+            )
+            return True
+
+        if max_scroll_x > 0:
+            step = -48 if wheel_rotation > 0 else 48
+            self.circuit_scroll_x = self.clamp(
+                self.circuit_scroll_x + step, 0, max_scroll_x
+            )
+            return True
+
+        return False
 
     def start_scope_scroll_drag(self, x_pos, y_pos):
         """Start dragging a scope scrollbar thumb if one was clicked."""
