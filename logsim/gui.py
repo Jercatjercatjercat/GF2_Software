@@ -52,9 +52,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_mode = None
         self.scope_drag_offset = 0
         self.scope_geometry = {}
+        self.follow_latest_cycles = True
 
         self.left_margin = 150
-        self.cycle_width = 26
+        self.default_cycle_width = 28
+        self.cycle_width = self.default_cycle_width
         self.row_height = 34
         self.high_offset = 18
         self.low_offset = 4
@@ -79,6 +81,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.scope_drag_mode = None
+        self.follow_latest_cycles = False
         self.init = False
         self.Refresh()
 
@@ -109,19 +112,38 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        circuit_height = min(190, max(130, size.height * 0.24))
+        top_margin = 18
+        scope_y = 20
+        scope_gap = 8
+        min_scope_height = 240
+        desired_circuit_height = self.estimate_circuit_height()
+        max_circuit_height = max(
+            160,
+            size.height - top_margin - scope_y - scope_gap
+            - min_scope_height
+        )
+        circuit_height = min(desired_circuit_height, max_circuit_height)
+        circuit_height = max(160, circuit_height)
         circuit_bounds = (
-            18, size.height - circuit_height - 24,
+            18, size.height - circuit_height - top_margin,
             size.width - 36, circuit_height
         )
         scope_bounds = (
-            18, 28, size.width - 36,
-            size.height - circuit_height - 72
+            18, scope_y, size.width - 36,
+            circuit_bounds[1] - scope_y - scope_gap
         )
 
-        if scope_bounds[3] < 240:
-            scope_bounds = (18, 28, size.width - 36, 240)
-            circuit_bounds = (18, 290, size.width - 36, circuit_height)
+        if scope_bounds[3] < min_scope_height:
+            scope_bounds = (
+                18, scope_y, size.width - 36, min_scope_height
+            )
+            circuit_y = scope_y + min_scope_height + scope_gap
+            circuit_height = max(
+                120, size.height - circuit_y - top_margin
+            )
+            circuit_bounds = (
+                18, circuit_y, size.width - 36, circuit_height
+            )
 
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
@@ -174,8 +196,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             for device in self.devices.devices_list
         )
         block_width = min(148, max(112, longest_name * 8 + 24))
-        block_height = 36
+        block_height = 34
         usable_width = max(width - block_width - 90, 1)
+        top_padding = 42
+        bottom_padding = 14
 
         for layer, devices_in_layer in layer_groups.items():
             if max_layer == 0:
@@ -184,18 +208,41 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 node_x = x_pos + 48 + layer * usable_width / max_layer
 
             count = len(devices_in_layer)
-            available_height = max(height - 62, 1)
+            available_height = max(
+                height - top_padding - bottom_padding - block_height, 1
+            )
             for index, device in enumerate(devices_in_layer):
                 if count == 1:
                     node_y = y_pos + height / 2 - block_height / 2 - 4
                 else:
                     gap = available_height / (count - 1)
-                    node_y = y_pos + height - 64 - index * gap
+                    node_y = (
+                        y_pos + bottom_padding
+                        + (count - 1 - index) * gap
+                    )
                 positions[device.device_id] = (
                     node_x, node_y, block_width, block_height
                 )
 
         return positions
+
+    def estimate_circuit_height(self):
+        """Return enough circuit height to avoid stacked device overlap."""
+        layers = self.calculate_device_layers()
+        layer_counts = {}
+        for device in self.devices.devices_list:
+            layer = layers.get(device.device_id, 1)
+            layer_counts[layer] = layer_counts.get(layer, 0) + 1
+
+        max_devices_in_layer = max(layer_counts.values(), default=1)
+        block_height = 34
+        row_gap = 8
+        vertical_padding = 56
+        return (
+            vertical_padding
+            + max_devices_in_layer * block_height
+            + max(0, max_devices_in_layer - 1) * row_gap
+        )
 
     def calculate_device_layers(self):
         """Group devices by dependency depth for circuit drawing."""
@@ -358,24 +405,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Draw monitor signals in a floating oscilloscope window."""
         x_pos, y_pos, width, height = bounds
 
-        margin_x = 34 if width > 520 else 8
+        margin_x = 12 if width > 520 else 6
         scope_bounds = (
             x_pos + margin_x,
-            y_pos + 8,
+            y_pos + 2,
             width - 2 * margin_x,
-            height - 16,
+            height - 4,
         )
         scope_x, scope_y, scope_width, scope_height = scope_bounds
 
         self.draw_rectangle(
-            (scope_x + 7, scope_y - 7, scope_width, scope_height),
-            (0.42, 0.42, 0.42),
-        )
-        self.draw_rectangle(
             scope_bounds, (0.78, 0.78, 0.78), (0.36, 0.36, 0.38)
         )
         self.draw_scope_header(scope_bounds)
-        self.draw_scope_controls(scope_bounds)
 
         if not monitor_items:
             self.render_text(
@@ -397,8 +439,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         label_width = self.calculate_scope_label_width(monitor_items)
         title_height = 28
-        control_height = 42
-        axis_height = 72
+        control_height = 8
+        axis_height = 84
         scroll_width = 14
 
         plot_x = scope_x + label_width
@@ -407,12 +449,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
 
-        max_visible_cycles = max(10, int(plot_width // self.cycle_width))
+        max_visible_cycles = max(
+            10, int(plot_width // self.default_cycle_width)
+        )
         cycle_count = min(max(max_cycles, 10), max_visible_cycles)
         max_first_cycle = max(max_cycles - cycle_count, 0)
-        self.scope_first_cycle = self.clamp(
-            self.scope_first_cycle, 0, max_first_cycle
-        )
+        if self.follow_latest_cycles:
+            self.scope_first_cycle = max_first_cycle
+        else:
+            self.scope_first_cycle = self.clamp(
+                self.scope_first_cycle, 0, max_first_cycle
+            )
         first_cycle = self.scope_first_cycle
         self.cycle_width = plot_width / max(cycle_count, 1)
 
@@ -455,46 +502,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             (x_pos + 9, y_pos + height - 21, 12, 12),
             (0.82, 0.90, 0.98), (0.35, 0.48, 0.64)
         )
-
-        button_y = y_pos + height - 21
-        self.draw_window_button(x_pos + width - 55, button_y, "_")
-        self.draw_window_button(x_pos + width - 37, button_y, "[]")
-        self.draw_window_button(x_pos + width - 19, button_y, "x")
-
-    def draw_scope_controls(self, bounds):
-        """Draw toolbar buttons and top slider inside the scope."""
-        x_pos, y_pos, width, height = bounds
-        controls_y = y_pos + height - 70
-
-        self.draw_toolbar_button(x_pos + 12, controls_y + 12, "||")
-        self.draw_toolbar_button(x_pos + 39, controls_y + 12, "+")
-
-        slider_x = x_pos + 110
-        slider_y = controls_y + 24
-        slider_width = width - 190
-        self.set_colour(0.88, 0.88, 0.88)
-        GL.glBegin(GL.GL_LINES)
-        GL.glVertex2f(slider_x, slider_y)
-        GL.glVertex2f(slider_x + slider_width, slider_y)
-        GL.glEnd()
-        self.draw_rectangle(
-            (slider_x + slider_width * 0.50 - 4, slider_y - 10, 8, 20),
-            (0.74, 0.88, 0.94), (0.42, 0.58, 0.66)
-        )
-
-    def draw_window_button(self, x_pos, y_pos, label):
-        """Draw a small title-bar window button."""
-        self.draw_rectangle(
-            (x_pos, y_pos, 13, 12), (0.86, 0.89, 0.93), (0.45, 0.48, 0.52)
-        )
-        self.render_text(label, x_pos + 3, y_pos + 2, (0.18, 0.20, 0.22))
-
-    def draw_toolbar_button(self, x_pos, y_pos, label):
-        """Draw a small oscilloscope toolbar button."""
-        self.draw_rectangle(
-            (x_pos, y_pos, 20, 22), (0.88, 0.92, 0.96), (0.52, 0.56, 0.62)
-        )
-        self.render_text(label, x_pos + 5, y_pos + 7, (0.20, 0.34, 0.60))
 
     def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
         """Draw oscilloscope grid lines."""
@@ -685,7 +692,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             (0.72, 0.72, 0.74), (0.48, 0.48, 0.50)
         )
 
-        bar_y = y_pos + 22
+        bar_y = y_pos + 34
         bar_x = plot_x
         bar_width = plot_width
         horizontal_track = (bar_x, bar_y, bar_width, 13)
@@ -747,10 +754,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         last_cycle = min(last_cycle, max(max_cycles - 1, 0))
         self.render_text(
             "Cycles shown: " + str(first_cycle) + "-" + str(last_cycle),
-            plot_x, plot_y - 52, (0.20, 0.20, 0.22)
+            plot_x + 28, plot_y - 76, (0.20, 0.20, 0.22)
         )
         self.render_text(
-            "Level", plot_x - 38, plot_y - 52, (0.34, 0.34, 0.36)
+            "Level", plot_x - 38, plot_y - 76, (0.34, 0.34, 0.36)
         )
 
     def max_recorded_cycles(self, monitor_items):
@@ -926,6 +933,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
             self.scope_drag_mode = "horizontal"
             self.scope_drag_offset = x_pos - horizontal_thumb[0]
+            self.follow_latest_cycles = False
             return True
 
         if horizontal_thumb and self.point_in_rect(
@@ -933,6 +941,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         ):
             self.scope_drag_mode = "horizontal"
             self.scope_drag_offset = horizontal_thumb[2] / 2
+            self.follow_latest_cycles = False
             self.update_scope_scroll_drag(x_pos, y_pos)
             self.Refresh()
             return True
@@ -961,6 +970,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             track = self.scope_geometry.get("horizontal_track")
             thumb = self.scope_geometry.get("horizontal_thumb")
             max_first_cycle = self.scope_geometry.get("max_first_cycle", 0)
+            self.follow_latest_cycles = False
             if not track or not thumb or max_first_cycle == 0:
                 return
 
@@ -1085,7 +1095,7 @@ class Gui(wx.Frame):
             self,
             wx.ID_ANY,
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP,
-            size=(-1, 120),
+            size=(-1, 72),
         )
         self.log_text.SetFont(
             wx.Font(
@@ -1240,6 +1250,7 @@ class Gui(wx.Frame):
         """Run the simulation from a cold start."""
         self.stop_auto_run()
         self.clear_removed_default_traces()
+        self.canvas.follow_latest_cycles = True
         success, message = self.controller.run_from_start(
             self.cycles_spin.GetValue()
         )
@@ -1248,6 +1259,7 @@ class Gui(wx.Frame):
     def on_continue_button(self, event):
         """Continue a previous simulation."""
         self.stop_auto_run()
+        self.canvas.follow_latest_cycles = True
         success, message = self.controller.continue_simulation(
             self.cycles_spin.GetValue()
         )
@@ -1262,6 +1274,7 @@ class Gui(wx.Frame):
     def on_auto_run_button(self, event):
         """Start or stop continuous simulation."""
         if self.auto_run_button.GetValue():
+            self.canvas.follow_latest_cycles = True
             self.auto_timer.Start(self.get_auto_delay())
             self.set_status("Auto run started.")
         else:
@@ -1388,6 +1401,7 @@ class Gui(wx.Frame):
             "Set Switch: changes the selected switch to 0 or 1.\n"
             "Add/Remove Monitor: controls which outputs are shown.\n"
             "Mouse drag pans the display; mouse wheel zooms it.\n"
+            "Over the oscilloscope, the mouse wheel scrolls signal rows.\n"
             "File > Open loads another definition file.",
             "Interface Help",
             wx.OK | wx.ICON_INFORMATION,
