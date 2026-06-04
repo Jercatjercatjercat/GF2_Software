@@ -8,6 +8,7 @@ OpenGL canvas and can be panned or zoomed with the mouse.
 import math
 import os
 import shutil
+import zlib
 
 import wx
 import wx.glcanvas as wxcanvas
@@ -55,6 +56,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_offset = 0
         self.scope_geometry = {}
         self.follow_latest_cycles = True
+        self.last_circuit_bounds = None
         self.last_scope_bounds = None
 
         self.left_margin = 150
@@ -148,6 +150,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 18, circuit_y, size.width - 36, circuit_height
             )
 
+        self.last_circuit_bounds = circuit_bounds
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
         self.draw_oscilloscope(scope_bounds, monitor_items)
@@ -159,39 +162,140 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if swap:
             self.SwapBuffers()
 
+    def save_circuit_image(self, path):
+        """Save the currently displayed circuit overview."""
+        return self.save_region_image(path, self.last_circuit_bounds)
+
     def save_scope_image(self, path):
-        """Save the currently displayed oscilloscope as a PNG image."""
+        """Save the currently displayed oscilloscope."""
+        return self.save_region_image(path, self.last_scope_bounds)
+
+    def save_region_image(self, path, bounds):
+        """Save part of the canvas as a PNG image or one-page PDF."""
         self.render(swap=False)
-        if self.last_scope_bounds is None:
-            return False
+        try:
+            if bounds is None:
+                return False
 
-        x_pos, y_pos, width, height = self.last_scope_bounds
-        size = self.GetClientSize()
-        x_pos = max(0, int(round(x_pos)))
-        y_pos = max(0, int(round(y_pos)))
-        width = min(int(round(width)), size.width - x_pos)
-        height = min(int(round(height)), size.height - y_pos)
-        if width <= 0 or height <= 0:
-            return False
+            x_pos, y_pos, width, height = bounds
+            size = self.GetClientSize()
+            x_pos = x_pos * self.zoom + self.pan_x
+            y_pos = y_pos * self.zoom + self.pan_y
+            width = width * self.zoom
+            height = height * self.zoom
+            x_pos = max(0, int(round(x_pos)))
+            y_pos = max(0, int(round(y_pos)))
+            width = min(int(round(width)), size.width - x_pos)
+            height = min(int(round(height)), size.height - y_pos)
+            if width <= 0 or height <= 0:
+                return False
 
-        GL.glReadBuffer(GL.GL_BACK)
-        GL.glPixelStorei(GL.GL_PACK_ALIGNMENT, 1)
-        GL.glFinish()
-        pixels = GL.glReadPixels(
-            x_pos, y_pos, width, height, GL.GL_RGB, GL.GL_UNSIGNED_BYTE
+            GL.glReadBuffer(GL.GL_BACK)
+            GL.glPixelStorei(GL.GL_PACK_ALIGNMENT, 1)
+            GL.glFinish()
+            pixels = GL.glReadPixels(
+                x_pos, y_pos, width, height, GL.GL_RGB, GL.GL_UNSIGNED_BYTE
+            )
+            row_length = width * 3
+            pixel_data = bytes(pixels)
+            image_data = b"".join(
+                pixel_data[row * row_length:(row + 1) * row_length]
+                for row in range(height - 1, -1, -1)
+            )
+
+            if path.lower().endswith(".pdf"):
+                self.write_image_pdf(path, width, height, image_data)
+                return True
+
+            image = wx.Image(width, height)
+            image.SetData(image_data)
+            return image.SaveFile(path, wx.BITMAP_TYPE_PNG)
+        finally:
+            self.SwapBuffers()
+
+    def write_image_pdf(self, path, image_width, image_height, image_data):
+        """Write RGB image data to a one-page PDF."""
+        if image_width >= image_height:
+            page_width, page_height = 842, 595
+        else:
+            page_width, page_height = 595, 842
+
+        margin = 36
+        scale = min(
+            (page_width - 2 * margin) / image_width,
+            (page_height - 2 * margin) / image_height,
         )
-        row_length = width * 3
-        pixel_data = bytes(pixels)
-        flipped_data = b"".join(
-            pixel_data[row * row_length:(row + 1) * row_length]
-            for row in range(height - 1, -1, -1)
-        )
+        draw_width = image_width * scale
+        draw_height = image_height * scale
+        draw_x = (page_width - draw_width) / 2
+        draw_y = (page_height - draw_height) / 2
 
-        image = wx.Image(width, height)
-        image.SetData(flipped_data)
-        saved = image.SaveFile(path, wx.BITMAP_TYPE_PNG)
-        self.SwapBuffers()
-        return saved
+        compressed_image = zlib.compress(image_data)
+        content = (
+            "q\n"
+            + self.pdf_number(draw_width) + " 0 0 "
+            + self.pdf_number(draw_height) + " "
+            + self.pdf_number(draw_x) + " "
+            + self.pdf_number(draw_y) + " cm\n"
+            + "/Im0 Do\nQ\n"
+        ).encode("ascii")
+
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            (
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+                + str(page_width) + " " + str(page_height)
+                + "] /Resources << /XObject << /Im0 4 0 R >> >> "
+                + "/Contents 5 0 R >>"
+            ).encode("ascii"),
+            (
+                "<< /Type /XObject /Subtype /Image /Width "
+                + str(image_width) + " /Height " + str(image_height)
+                + " /ColorSpace /DeviceRGB /BitsPerComponent 8 "
+                + "/Filter /FlateDecode /Length "
+                + str(len(compressed_image)) + " >>\nstream\n"
+            ).encode("ascii") + compressed_image + b"\nendstream",
+            (
+                "<< /Length " + str(len(content)) + " >>\nstream\n"
+            ).encode("ascii") + content + b"endstream",
+        ]
+
+        pdf_data = self.build_pdf(objects)
+        with open(path, "wb") as pdf_file:
+            pdf_file.write(pdf_data)
+
+    def build_pdf(self, objects):
+        """Build a minimal PDF from encoded object bodies."""
+        pdf_data = b"%PDF-1.4\n"
+        offsets = []
+        for index, body in enumerate(objects, start=1):
+            offsets.append(len(pdf_data))
+            pdf_data += (
+                str(index).encode("ascii") + b" 0 obj\n"
+                + body + b"\nendobj\n"
+            )
+
+        xref_offset = len(pdf_data)
+        pdf_data += (
+            b"xref\n0 " + str(len(objects) + 1).encode("ascii") + b"\n"
+            + b"0000000000 65535 f \n"
+        )
+        for offset in offsets:
+            pdf_data += (
+                str(offset).zfill(10).encode("ascii") + b" 00000 n \n"
+            )
+        pdf_data += (
+            b"trailer\n<< /Size "
+            + str(len(objects) + 1).encode("ascii")
+            + b" /Root 1 0 R >>\nstartxref\n"
+            + str(xref_offset).encode("ascii") + b"\n%%EOF\n"
+        )
+        return pdf_data
+
+    def pdf_number(self, value):
+        """Return a compact PDF numeric literal."""
+        return ("%.2f" % value).rstrip("0").rstrip(".")
 
     def draw_canvas_grid(self, size):
         """Draw a faint simulator-style workspace grid."""
@@ -1097,13 +1201,15 @@ class Gui(wx.Frame):
     def configure_menu(self):
         """Create the File and Help menus."""
         self.help_menu_id = wx.NewIdRef()
+        self.export_circuit_menu_id = wx.NewIdRef()
         self.export_scope_menu_id = wx.NewIdRef()
 
         file_menu = wx.Menu()
         menu_bar = wx.MenuBar()
         file_menu.Append(wx.ID_OPEN, "&Open definition file...")
         file_menu.Append(wx.ID_SAVEAS, "&Save definition as...")
-        file_menu.Append(self.export_scope_menu_id, "&Export oscilloscope PNG...")
+        file_menu.Append(self.export_circuit_menu_id, "&Export circuit...")
+        file_menu.Append(self.export_scope_menu_id, "&Export oscilloscope...")
         file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "&Exit")
 
@@ -1131,6 +1237,9 @@ class Gui(wx.Frame):
         )
         self.open_button = wx.Button(self, wx.ID_ANY, "Open File")
         self.save_button = wx.Button(self, wx.ID_ANY, "Save File")
+        self.export_circuit_button = wx.Button(
+            self, wx.ID_ANY, "Export Circuit"
+        )
         self.export_scope_button = wx.Button(
             self, wx.ID_ANY, "Export Scope"
         )
@@ -1219,6 +1328,8 @@ class Gui(wx.Frame):
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.save_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.export_circuit_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.export_scope_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.help_button, 0,
@@ -1271,6 +1382,9 @@ class Gui(wx.Frame):
         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
         self.open_button.Bind(wx.EVT_BUTTON, lambda event: self.on_open_file())
         self.save_button.Bind(wx.EVT_BUTTON, lambda event: self.on_save_file())
+        self.export_circuit_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_export_circuit()
+        )
         self.export_scope_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_export_scope()
         )
@@ -1292,6 +1406,8 @@ class Gui(wx.Frame):
             self.on_open_file()
         elif event_id == wx.ID_SAVEAS:
             self.on_save_file()
+        elif event_id == int(self.export_circuit_menu_id):
+            self.on_export_circuit()
         elif event_id == int(self.export_scope_menu_id):
             self.on_export_scope()
         elif event_id == int(self.help_menu_id):
@@ -1450,26 +1566,42 @@ class Gui(wx.Frame):
             )
             self.set_status("Could not save file.", error=True)
 
-    def on_export_scope(self):
-        """Export the current oscilloscope view to a PNG image."""
+    def on_export_circuit(self):
+        """Export the current circuit overview to an image or PDF."""
         default_dir = os.path.dirname(self.path)
         base_name = os.path.splitext(os.path.basename(self.path))[0]
-        default_file = base_name + "_oscilloscope.png"
+        export_path = self.choose_export_path(
+            "Export logic circuit",
+            default_dir,
+            base_name + "_circuit.png",
+        )
+        if export_path is None:
+            return
 
-        with wx.FileDialog(
-            self,
-            "Export oscilloscope as PNG",
-            defaultDir=default_dir,
-            defaultFile=default_file,
-            wildcard="PNG image (*.png)|*.png",
-            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
-        ) as dialog:
-            if dialog.ShowModal() == wx.ID_CANCEL:
-                return
-            export_path = dialog.GetPath()
+        try:
+            if self.canvas.save_circuit_image(export_path):
+                self.set_status("Exported circuit to " + export_path)
+            else:
+                self.set_status("Could not export circuit.", error=True)
+        except Exception as error:
+            wx.MessageBox(
+                "The circuit image could not be exported.\n" + str(error),
+                "Circuit Export Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            self.set_status("Could not export circuit.", error=True)
 
-        if not export_path.lower().endswith(".png"):
-            export_path = export_path + ".png"
+    def on_export_scope(self):
+        """Export the current oscilloscope view to an image or PDF."""
+        default_dir = os.path.dirname(self.path)
+        base_name = os.path.splitext(os.path.basename(self.path))[0]
+        export_path = self.choose_export_path(
+            "Export oscilloscope",
+            default_dir,
+            base_name + "_oscilloscope.png",
+        )
+        if export_path is None:
+            return
 
         try:
             if self.canvas.save_scope_image(export_path):
@@ -1484,6 +1616,31 @@ class Gui(wx.Frame):
                 wx.OK | wx.ICON_ERROR,
             )
             self.set_status("Could not export oscilloscope.", error=True)
+
+    def choose_export_path(self, title, default_dir, default_file):
+        """Return a PNG or PDF path selected by the user."""
+        with wx.FileDialog(
+            self,
+            title,
+            defaultDir=default_dir,
+            defaultFile=default_file,
+            wildcard="PNG image (*.png)|*.png|PDF document (*.pdf)|*.pdf",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return None
+            export_path = dialog.GetPath()
+            filter_index = dialog.GetFilterIndex()
+
+        _, extension = os.path.splitext(export_path)
+        extension = extension.lower()
+        if extension not in [".png", ".pdf"]:
+            if filter_index == 1:
+                export_path += ".pdf"
+            else:
+                export_path += ".png"
+
+        return export_path
 
     def load_definition_file(self, path):
         """Replace the current simulator state with a parsed file."""
