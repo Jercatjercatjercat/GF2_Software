@@ -47,12 +47,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_mouse_x = 0
         self.last_mouse_y = 0
         self.zoom = 1.0
+        self.scope_first_cycle = 0
+        self.scope_first_row = 0
+        self.scope_drag_mode = None
+        self.scope_drag_offset = 0
+        self.scope_geometry = {}
 
         self.left_margin = 150
         self.cycle_width = 26
-        self.row_height = 38
-        self.high_offset = 22
-        self.low_offset = 6
+        self.row_height = 34
+        self.high_offset = 18
+        self.low_offset = 4
         self.trace_colours = [
             (0.20, 0.23, 0.78),
             (0.16, 0.50, 0.26),
@@ -67,10 +72,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
 
     def reset_view(self):
-        """Reset pan and zoom to their defaults."""
+        """Reset pan, zoom, and oscilloscope scroll to their defaults."""
         self.pan_x = 0
         self.pan_y = 0
         self.zoom = 1.0
+        self.scope_first_cycle = 0
+        self.scope_first_row = 0
+        self.scope_drag_mode = None
         self.init = False
         self.Refresh()
 
@@ -101,12 +109,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        circuit_bounds = (18, size.height - 238, size.width - 36, 212)
-        scope_bounds = (18, 28, size.width - 36, size.height - 292)
+        circuit_height = min(190, max(130, size.height * 0.24))
+        circuit_bounds = (
+            18, size.height - circuit_height - 24,
+            size.width - 36, circuit_height
+        )
+        scope_bounds = (
+            18, 28, size.width - 36,
+            size.height - circuit_height - 72
+        )
 
         if scope_bounds[3] < 240:
             scope_bounds = (18, 28, size.width - 36, 240)
-            circuit_bounds = (18, 290, size.width - 36, 212)
+            circuit_bounds = (18, 290, size.width - 36, circuit_height)
 
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
@@ -383,7 +398,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         label_width = self.calculate_scope_label_width(monitor_items)
         title_height = 28
         control_height = 42
-        axis_height = 54
+        axis_height = 72
         scroll_width = 14
 
         plot_x = scope_x + label_width
@@ -392,25 +407,38 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
 
-        max_visible_cycles = max(10, int(plot_width // 13))
-        if max_cycles > max_visible_cycles:
-            first_cycle = max_cycles - max_visible_cycles
-            cycle_count = max_visible_cycles
-        else:
-            first_cycle = 0
-            cycle_count = max(max_cycles, 10)
+        max_visible_cycles = max(10, int(plot_width // self.cycle_width))
+        cycle_count = min(max(max_cycles, 10), max_visible_cycles)
+        max_first_cycle = max(max_cycles - cycle_count, 0)
+        self.scope_first_cycle = self.clamp(
+            self.scope_first_cycle, 0, max_first_cycle
+        )
+        first_cycle = self.scope_first_cycle
         self.cycle_width = plot_width / max(cycle_count, 1)
+
+        total_rows = len(monitor_items)
+        visible_rows = min(
+            total_rows, max(1, int(plot_height // self.row_height))
+        )
+        max_first_row = max(total_rows - visible_rows, 0)
+        self.scope_first_row = self.clamp(
+            self.scope_first_row, 0, max_first_row
+        )
+        visible_monitor_items = monitor_items[
+            self.scope_first_row:self.scope_first_row + visible_rows
+        ]
 
         self.draw_scope_grid(
             plot_x, plot_y, plot_width, plot_height, cycle_count
         )
         self.draw_scope_scrollbars(
             scope_bounds, plot_x, plot_y, plot_width, plot_height,
-            first_cycle, max_cycles, cycle_count
+            first_cycle, max_cycles, cycle_count, self.scope_first_row,
+            total_rows, visible_rows
         )
         self.draw_scope_rows(
-            scope_x, plot_x, plot_y, plot_height, monitor_items,
-            first_cycle, cycle_count
+            scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
+            first_cycle, cycle_count, self.scope_first_row
         )
         self.draw_scope_axis(
             plot_x, plot_y, cycle_count, first_cycle, max_cycles
@@ -487,19 +515,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
 
     def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
-                        monitor_items, first_cycle, cycle_count):
+                        monitor_items, first_cycle, cycle_count,
+                        first_row):
         """Draw all monitored signal names and waveforms."""
-        row_gap = min(
-            self.row_height, plot_height / max(len(monitor_items), 1)
-        )
+        row_gap = min(44, plot_height / max(len(monitor_items), 1))
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), signal_list = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
             row_mid = plot_y + plot_height - 18 - index * row_gap
             row_base = row_mid - self.high_offset / 2
 
+            colour_index = first_row + index
             colour = self.trace_colour_for_monitor(
-                device_id, output_id, index
+                device_id, output_id, colour_index
             )
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
@@ -628,26 +656,41 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def draw_scope_scrollbars(self, bounds, plot_x, plot_y, plot_width,
                               plot_height, first_cycle, max_cycles,
-                              cycle_count):
-        """Draw decorative scrollbars like a scope display."""
+                              cycle_count, first_row, total_rows,
+                              visible_rows):
+        """Draw oscilloscope scrollbars and save their hit targets."""
         x_pos, y_pos, width, _ = bounds
         right_x = plot_x + plot_width + 6
+        self.scope_geometry = {
+            "plot": (plot_x, plot_y, plot_width, plot_height),
+            "max_first_cycle": max(max_cycles - cycle_count, 0),
+            "max_first_row": max(total_rows - visible_rows, 0),
+        }
 
+        vertical_track = (right_x, plot_y, 10, plot_height)
         self.draw_rectangle(
-            (right_x, plot_y, 10, plot_height), (0.88, 0.88, 0.88),
+            vertical_track, (0.88, 0.88, 0.88),
             (0.62, 0.62, 0.64)
         )
-        thumb_height = max(28, plot_height * 0.28)
+        if total_rows > visible_rows:
+            thumb_height = max(28, plot_height * visible_rows / total_rows)
+            fraction = first_row / max(total_rows - visible_rows, 1)
+            thumb_y = plot_y + (1 - fraction) * (plot_height - thumb_height)
+        else:
+            thumb_height = max(28, plot_height * 0.55)
+            thumb_y = plot_y + (plot_height - thumb_height) / 2
+        vertical_thumb = (right_x + 1, thumb_y, 8, thumb_height)
         self.draw_rectangle(
-            (right_x + 1, plot_y + plot_height * 0.48, 8, thumb_height),
+            vertical_thumb,
             (0.72, 0.72, 0.74), (0.48, 0.48, 0.50)
         )
 
         bar_y = y_pos + 22
         bar_x = plot_x
         bar_width = plot_width
+        horizontal_track = (bar_x, bar_y, bar_width, 13)
         self.draw_rectangle(
-            (bar_x, bar_y, bar_width, 13), (0.88, 0.88, 0.88),
+            horizontal_track, (0.88, 0.88, 0.88),
             (0.62, 0.62, 0.64)
         )
         self.draw_rectangle(
@@ -666,10 +709,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         else:
             thumb_width = max(44, bar_width * 0.55)
             thumb_x = bar_x + (bar_width - thumb_width) / 2
+        horizontal_thumb = (thumb_x, bar_y + 2, thumb_width, 9)
         self.draw_rectangle(
-            (thumb_x, bar_y + 2, thumb_width, 9), (0.72, 0.72, 0.74),
+            horizontal_thumb, (0.72, 0.72, 0.74),
             (0.48, 0.48, 0.50)
         )
+        self.scope_geometry.update({
+            "vertical_track": vertical_track,
+            "vertical_thumb": vertical_thumb,
+            "horizontal_track": horizontal_track,
+            "horizontal_thumb": horizontal_thumb,
+        })
         self.render_text("<", bar_x - 9, bar_y + 2, (0.26, 0.26, 0.28))
         self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
                          (0.26, 0.26, 0.28))
@@ -697,10 +747,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         last_cycle = min(last_cycle, max(max_cycles - 1, 0))
         self.render_text(
             "Cycles shown: " + str(first_cycle) + "-" + str(last_cycle),
-            plot_x, plot_y - 34, (0.20, 0.20, 0.22)
+            plot_x, plot_y - 52, (0.20, 0.20, 0.22)
         )
         self.render_text(
-            "Level", plot_x - 30, plot_y - 34, (0.34, 0.34, 0.36)
+            "Level", plot_x - 38, plot_y - 52, (0.34, 0.34, 0.36)
         )
 
     def max_recorded_cycles(self, monitor_items):
@@ -811,6 +861,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            if self.start_scope_scroll_drag(object_x, object_y):
+                return
+
+        if event.Dragging() and self.scope_drag_mode is not None:
+            self.update_scope_scroll_drag(object_x, object_y)
+            self.Refresh()
+            return
+
+        if event.ButtonUp():
+            self.scope_drag_mode = None
 
         if event.Dragging():
             self.pan_x += event.GetX() - self.last_mouse_x
@@ -821,6 +881,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.Refresh()
 
         wheel_rotation = event.GetWheelRotation()
+        if wheel_rotation != 0 and self.scroll_scope_rows(
+            object_x, object_y, wheel_rotation
+        ):
+            self.Refresh()
+            return
+
         if wheel_rotation < 0:
             self.zoom *= 1.0 + (
                 wheel_rotation / (20 * event.GetWheelDelta())
@@ -837,6 +903,103 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.pan_y -= (self.zoom - old_zoom) * object_y
             self.init = False
             self.Refresh()
+
+    def start_scope_scroll_drag(self, x_pos, y_pos):
+        """Start dragging a scope scrollbar thumb if one was clicked."""
+        vertical_track = self.scope_geometry.get("vertical_track")
+        vertical_thumb = self.scope_geometry.get("vertical_thumb")
+        horizontal_track = self.scope_geometry.get("horizontal_track")
+        horizontal_thumb = self.scope_geometry.get("horizontal_thumb")
+
+        if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+            self.scope_drag_mode = "vertical"
+            self.scope_drag_offset = y_pos - vertical_thumb[1]
+            return True
+
+        if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+            self.scope_drag_mode = "vertical"
+            self.scope_drag_offset = vertical_thumb[3] / 2
+            self.update_scope_scroll_drag(x_pos, y_pos)
+            self.Refresh()
+            return True
+
+        if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+            self.scope_drag_mode = "horizontal"
+            self.scope_drag_offset = x_pos - horizontal_thumb[0]
+            return True
+
+        if horizontal_thumb and self.point_in_rect(
+            x_pos, y_pos, horizontal_track
+        ):
+            self.scope_drag_mode = "horizontal"
+            self.scope_drag_offset = horizontal_thumb[2] / 2
+            self.update_scope_scroll_drag(x_pos, y_pos)
+            self.Refresh()
+            return True
+
+        return False
+
+    def update_scope_scroll_drag(self, x_pos, y_pos):
+        """Update the visible scope rows or cycles during a scrollbar drag."""
+        if self.scope_drag_mode == "vertical":
+            track = self.scope_geometry.get("vertical_track")
+            thumb = self.scope_geometry.get("vertical_thumb")
+            max_first_row = self.scope_geometry.get("max_first_row", 0)
+            if not track or not thumb or max_first_row == 0:
+                return
+
+            _, track_y, _, track_height = track
+            _, _, _, thumb_height = thumb
+            usable = max(track_height - thumb_height, 1)
+            thumb_y = self.clamp(
+                y_pos - self.scope_drag_offset, track_y, track_y + usable
+            )
+            fraction = 1 - ((thumb_y - track_y) / usable)
+            self.scope_first_row = int(round(fraction * max_first_row))
+
+        if self.scope_drag_mode == "horizontal":
+            track = self.scope_geometry.get("horizontal_track")
+            thumb = self.scope_geometry.get("horizontal_thumb")
+            max_first_cycle = self.scope_geometry.get("max_first_cycle", 0)
+            if not track or not thumb or max_first_cycle == 0:
+                return
+
+            track_x, _, track_width, _ = track
+            _, _, thumb_width, _ = thumb
+            usable = max(track_width - thumb_width, 1)
+            thumb_x = self.clamp(
+                x_pos - self.scope_drag_offset, track_x, track_x + usable
+            )
+            fraction = (thumb_x - track_x) / usable
+            self.scope_first_cycle = int(round(fraction * max_first_cycle))
+
+    def scroll_scope_rows(self, x_pos, y_pos, wheel_rotation):
+        """Scroll visible signal rows when the mouse wheel is over the scope."""
+        plot = self.scope_geometry.get("plot")
+        max_first_row = self.scope_geometry.get("max_first_row", 0)
+        if not self.point_in_rect(x_pos, y_pos, plot) or max_first_row == 0:
+            return False
+
+        step = -1 if wheel_rotation > 0 else 1
+        self.scope_first_row = self.clamp(
+            self.scope_first_row + step, 0, max_first_row
+        )
+        return True
+
+    def point_in_rect(self, x_pos, y_pos, rect):
+        """Return True if a point lies within an OpenGL rectangle."""
+        if rect is None:
+            return False
+
+        rect_x, rect_y, rect_width, rect_height = rect
+        return (
+            rect_x <= x_pos <= rect_x + rect_width
+            and rect_y <= y_pos <= rect_y + rect_height
+        )
+
+    def clamp(self, value, minimum, maximum):
+        """Clamp a number between two bounds."""
+        return max(minimum, min(value, maximum))
 
     def render_text(self, text, x_pos, y_pos, colour=(0.0, 0.0, 0.0)):
         """Draw bitmap text at the given position."""
@@ -866,6 +1029,8 @@ class Gui(wx.Frame):
 
         self.path = path
         self.controller = GuiController(names, devices, network, monitors)
+        self.default_monitor_keys = []
+        self.default_monitor_traces = {}
         self.auto_timer = wx.Timer(self)
 
         self.configure_menu()
@@ -874,6 +1039,7 @@ class Gui(wx.Frame):
         self.create_controls()
         self.configure_layout()
         self.bind_events()
+        self.remember_default_monitors()
         self.refresh_choices()
         self.set_status("Loaded " + path)
 
@@ -913,9 +1079,21 @@ class Gui(wx.Frame):
         )
         self.open_button = wx.Button(self, wx.ID_ANY, "Open File")
         self.help_button = wx.Button(self, wx.ID_ANY, "Help")
-        self.status_label = wx.StaticText(self, wx.ID_ANY, "")
-        self.status_label.Wrap(230)
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
+        self.log_entries = []
+        self.log_text = wx.TextCtrl(
+            self,
+            wx.ID_ANY,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP,
+            size=(-1, 120),
+        )
+        self.log_text.SetFont(
+            wx.Font(
+                9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
+                wx.FONTWEIGHT_NORMAL
+            )
+        )
+        self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
 
         self.switch_label = wx.StaticText(self, wx.ID_ANY, "Switch")
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
@@ -950,16 +1128,18 @@ class Gui(wx.Frame):
         root_sizer = wx.BoxSizer(wx.VERTICAL)
         toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
 
         switch_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Switches"),
                                        wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Monitors"),
                                         wx.VERTICAL)
-        status_box = wx.StaticBoxSizer(wx.StaticBox(self, label="Status"),
-                                       wx.VERTICAL)
         readings_box = wx.StaticBoxSizer(
             wx.StaticBox(self, label="Readings"), wx.VERTICAL
+        )
+        log_box = wx.StaticBoxSizer(
+            wx.StaticBox(self, label="Log"), wx.VERTICAL
         )
 
         toolbar_sizer.Add(self.cycles_label, 0,
@@ -1000,15 +1180,19 @@ class Gui(wx.Frame):
         monitor_box.Add(self.remove_monitor_button, 0,
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
-        status_box.Add(self.status_label, 0, wx.EXPAND | wx.ALL, 6)
         readings_box.Add(self.readings_list, 1, wx.EXPAND | wx.ALL, 6)
+        log_box.Add(self.log_text, 1, wx.EXPAND | wx.ALL, 6)
 
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(readings_box, 1, wx.EXPAND | wx.ALL, 6)
-        side_sizer.Add(status_box, 0, wx.EXPAND | wx.ALL, 6)
 
-        main_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
+        display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
+        display_sizer.Add(
+            log_box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6
+        )
+
+        main_sizer.Add(display_sizer, 1, wx.EXPAND)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
         root_sizer.Add(toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
@@ -1055,6 +1239,7 @@ class Gui(wx.Frame):
     def on_run_button(self, event):
         """Run the simulation from a cold start."""
         self.stop_auto_run()
+        self.clear_removed_default_traces()
         success, message = self.controller.run_from_start(
             self.cycles_spin.GetValue()
         )
@@ -1140,11 +1325,14 @@ class Gui(wx.Frame):
             self.after_action(False, "No current monitor selected.")
             return
 
+        self.archive_default_monitor(signal_name)
         success, message = self.controller.remove_monitor(signal_name)
         self.after_action(success, message)
 
     def on_reset_view_button(self, event):
-        """Reset canvas pan and zoom."""
+        """Restore the default monitor view and reset canvas pan and zoom."""
+        self.restore_default_monitors()
+        self.refresh_choices()
         self.canvas.reset_view()
         self.set_status("View reset.")
 
@@ -1186,6 +1374,7 @@ class Gui(wx.Frame):
         self.canvas.devices = devices
         self.canvas.monitors = monitors
         self.canvas.reset_view()
+        self.remember_default_monitors()
         self.refresh_choices()
         self.set_status("Loaded " + path)
 
@@ -1259,6 +1448,58 @@ class Gui(wx.Frame):
             return None
         return selection
 
+    def remember_default_monitors(self):
+        """Remember the monitor points that were present when a file loaded."""
+        monitor_items = self.controller.monitors.monitors_dictionary.items()
+        self.default_monitor_keys = [key for key, _ in monitor_items]
+        self.default_monitor_traces = {
+            key: list(trace) for key, trace in monitor_items
+        }
+
+    def archive_default_monitor(self, signal_name):
+        """Keep a removable default monitor trace available for Reset View."""
+        signal_ids = self.controller.get_existing_signal_ids(signal_name)
+        if signal_ids not in self.default_monitor_keys:
+            return
+
+        traces = self.controller.monitors.monitors_dictionary
+        if signal_ids in traces:
+            self.default_monitor_traces[signal_ids] = list(traces[signal_ids])
+
+    def restore_default_monitors(self):
+        """Restore the monitor set that was present when the file loaded."""
+        if not self.default_monitor_keys:
+            return
+
+        traces = self.controller.monitors.monitors_dictionary
+        restored_traces = []
+        for key in self.default_monitor_keys:
+            if key in traces:
+                restored_trace = list(traces[key])
+            else:
+                restored_trace = list(self.default_monitor_traces.get(key, []))
+
+            if len(restored_trace) < self.controller.cycles_completed:
+                restored_trace.extend(
+                    [self.controller.devices.BLANK]
+                    * (self.controller.cycles_completed - len(restored_trace))
+                )
+
+            restored_traces.append((key, list(restored_trace)))
+
+        traces.clear()
+        for key, trace in restored_traces:
+            traces[key] = trace
+
+        self.default_monitor_traces = dict(restored_traces)
+
+    def clear_removed_default_traces(self):
+        """Clear archived traces for default monitors absent before a new run."""
+        traces = self.controller.monitors.monitors_dictionary
+        for key in self.default_monitor_keys:
+            if key not in traces:
+                self.default_monitor_traces[key] = []
+
     def set_status(self, message, error=False):
         """Show a status message to the user."""
         prefix = "Error: " if error else ""
@@ -1266,7 +1507,21 @@ class Gui(wx.Frame):
             prefix + message + "\nCycles completed: "
             + str(self.controller.cycles_completed)
         )
-        self.status_label.SetLabel(status_text)
-        self.status_label.Wrap(230)
-        self.SetStatusText(status_text.replace("\n", "  |  "))
-        self.Layout()
+        self.SetStatusText("Status: " + status_text.replace("\n", "  |  "))
+        self.append_log(prefix + message)
+
+    def append_log(self, message):
+        """Append one message to the scrolling simulator log."""
+        if not hasattr(self, "log_text"):
+            return
+
+        cycle_text = str(self.controller.cycles_completed)
+        self.log_entries.append(
+            "[" + cycle_text.rjust(4) + "] " + str(message)
+        )
+        if len(self.log_entries) > 300:
+            self.log_entries = self.log_entries[-300:]
+
+        self.log_text.ChangeValue("\n".join(self.log_entries))
+        self.log_text.SetInsertionPointEnd()
+        self.log_text.ShowPosition(self.log_text.GetLastPosition())
