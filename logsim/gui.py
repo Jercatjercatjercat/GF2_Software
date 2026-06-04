@@ -545,7 +545,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Draw scrollbars for oversized circuit diagrams."""
         view_x, view_y, view_width, view_height = view_bounds
         content_width = self.circuit_geometry.get("content_width", view_width)
-        content_height = self.circuit_geometry.get("content_height", view_height)
+        content_height = self.circuit_geometry.get(
+            "content_height", view_height
+        )
         max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
         max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
 
@@ -713,7 +715,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         display_name = self.truncate_label(str(name), max_chars)
         display_kind = self.truncate_label(str(kind), max_chars)
 
-        self.draw_rectangle(bounds, fill_colour, self.theme_colour("device_border"))
+        self.draw_rectangle(
+            bounds, fill_colour, self.theme_colour("device_border")
+        )
         self.render_text(display_name, x_pos + 8, y_pos + height - 14)
         self.render_text(
             display_kind, x_pos + 8, y_pos + 8,
@@ -1552,7 +1556,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.scope_first_cycle = int(round(fraction * max_first_cycle))
 
     def scroll_scope_rows(self, x_pos, y_pos, wheel_rotation):
-        """Scroll visible signal rows when the mouse wheel is over the scope."""
+        """Scroll signal rows when the mouse wheel is over the scope."""
         plot = self.scope_geometry.get("plot")
         max_first_row = self.scope_geometry.get("max_first_row", 0)
         if not self.point_in_rect(x_pos, y_pos, plot) or max_first_row == 0:
@@ -2695,7 +2699,7 @@ class Gui(wx.Frame):
         self.default_monitor_traces = dict(restored_traces)
 
     def clear_removed_default_traces(self):
-        """Clear archived traces for default monitors absent before a new run."""
+        """Clear archived traces for monitors absent before a new run."""
         traces = self.controller.monitors.monitors_dictionary
         for key in self.default_monitor_keys:
             if key not in traces:
