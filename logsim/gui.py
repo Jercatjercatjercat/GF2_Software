@@ -6,6 +6,8 @@ OpenGL canvas and can be panned or zoomed with the mouse.
 """
 
 import math
+import os
+import shutil
 
 import wx
 import wx.glcanvas as wxcanvas
@@ -53,6 +55,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_offset = 0
         self.scope_geometry = {}
         self.follow_latest_cycles = True
+        self.last_scope_bounds = None
 
         self.left_margin = 150
         self.default_cycle_width = 28
@@ -100,7 +103,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glTranslated(self.pan_x, self.pan_y, 0.0)
         GL.glScaled(self.zoom, self.zoom, self.zoom)
 
-    def render(self):
+    def render(self, swap=True):
         """Draw the circuit overview and oscilloscope-style traces."""
         self.SetCurrent(self.context)
         if not self.init:
@@ -148,12 +151,47 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
         self.draw_oscilloscope(scope_bounds, monitor_items)
-        self.finish_render()
+        self.finish_render(swap)
 
-    def finish_render(self):
-        """Flush drawing commands and swap buffers."""
+    def finish_render(self, swap=True):
+        """Flush drawing commands and optionally swap buffers."""
         GL.glFlush()
+        if swap:
+            self.SwapBuffers()
+
+    def save_scope_image(self, path):
+        """Save the currently displayed oscilloscope as a PNG image."""
+        self.render(swap=False)
+        if self.last_scope_bounds is None:
+            return False
+
+        x_pos, y_pos, width, height = self.last_scope_bounds
+        size = self.GetClientSize()
+        x_pos = max(0, int(round(x_pos)))
+        y_pos = max(0, int(round(y_pos)))
+        width = min(int(round(width)), size.width - x_pos)
+        height = min(int(round(height)), size.height - y_pos)
+        if width <= 0 or height <= 0:
+            return False
+
+        GL.glReadBuffer(GL.GL_BACK)
+        GL.glPixelStorei(GL.GL_PACK_ALIGNMENT, 1)
+        GL.glFinish()
+        pixels = GL.glReadPixels(
+            x_pos, y_pos, width, height, GL.GL_RGB, GL.GL_UNSIGNED_BYTE
+        )
+        row_length = width * 3
+        pixel_data = bytes(pixels)
+        flipped_data = b"".join(
+            pixel_data[row * row_length:(row + 1) * row_length]
+            for row in range(height - 1, -1, -1)
+        )
+
+        image = wx.Image(width, height)
+        image.SetData(flipped_data)
+        saved = image.SaveFile(path, wx.BITMAP_TYPE_PNG)
         self.SwapBuffers()
+        return saved
 
     def draw_canvas_grid(self, size):
         """Draw a faint simulator-style workspace grid."""
@@ -412,6 +450,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             width - 2 * margin_x,
             height - 4,
         )
+        self.last_scope_bounds = scope_bounds
         scope_x, scope_y, scope_width, scope_height = scope_bounds
 
         self.draw_rectangle(
@@ -1058,10 +1097,13 @@ class Gui(wx.Frame):
     def configure_menu(self):
         """Create the File and Help menus."""
         self.help_menu_id = wx.NewIdRef()
+        self.export_scope_menu_id = wx.NewIdRef()
 
         file_menu = wx.Menu()
         menu_bar = wx.MenuBar()
         file_menu.Append(wx.ID_OPEN, "&Open definition file...")
+        file_menu.Append(wx.ID_SAVEAS, "&Save definition as...")
+        file_menu.Append(self.export_scope_menu_id, "&Export oscilloscope PNG...")
         file_menu.AppendSeparator()
         file_menu.Append(wx.ID_EXIT, "&Exit")
 
@@ -1088,6 +1130,10 @@ class Gui(wx.Frame):
             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
         )
         self.open_button = wx.Button(self, wx.ID_ANY, "Open File")
+        self.save_button = wx.Button(self, wx.ID_ANY, "Save File")
+        self.export_scope_button = wx.Button(
+            self, wx.ID_ANY, "Export Scope"
+        )
         self.help_button = wx.Button(self, wx.ID_ANY, "Help")
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
         self.log_entries = []
@@ -1171,6 +1217,10 @@ class Gui(wx.Frame):
         toolbar_sizer.AddStretchSpacer()
         toolbar_sizer.Add(self.open_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.save_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        toolbar_sizer.Add(self.export_scope_button, 0,
+                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         toolbar_sizer.Add(self.help_button, 0,
                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
@@ -1220,6 +1270,10 @@ class Gui(wx.Frame):
                                   self.on_auto_run_button)
         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
         self.open_button.Bind(wx.EVT_BUTTON, lambda event: self.on_open_file())
+        self.save_button.Bind(wx.EVT_BUTTON, lambda event: self.on_save_file())
+        self.export_scope_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_export_scope()
+        )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
@@ -1236,6 +1290,10 @@ class Gui(wx.Frame):
             self.Close(True)
         elif event_id == wx.ID_OPEN:
             self.on_open_file()
+        elif event_id == wx.ID_SAVEAS:
+            self.on_save_file()
+        elif event_id == int(self.export_scope_menu_id):
+            self.on_export_scope()
         elif event_id == int(self.help_menu_id):
             self.on_help()
         elif event_id == wx.ID_ABOUT:
@@ -1362,6 +1420,70 @@ class Gui(wx.Frame):
             path = dialog.GetPath()
 
         self.load_definition_file(path)
+
+    def on_save_file(self):
+        """Save a copy of the currently loaded definition file."""
+        default_dir = os.path.dirname(self.path)
+        default_file = os.path.basename(self.path)
+
+        with wx.FileDialog(
+            self,
+            "Save logic definition file",
+            defaultDir=default_dir,
+            defaultFile=default_file,
+            wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return
+            save_path = dialog.GetPath()
+
+        try:
+            if os.path.abspath(save_path) != os.path.abspath(self.path):
+                shutil.copyfile(self.path, save_path)
+            self.set_status("Saved file to " + save_path)
+        except OSError as error:
+            wx.MessageBox(
+                "The file could not be saved.\n" + str(error),
+                "File Save Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            self.set_status("Could not save file.", error=True)
+
+    def on_export_scope(self):
+        """Export the current oscilloscope view to a PNG image."""
+        default_dir = os.path.dirname(self.path)
+        base_name = os.path.splitext(os.path.basename(self.path))[0]
+        default_file = base_name + "_oscilloscope.png"
+
+        with wx.FileDialog(
+            self,
+            "Export oscilloscope as PNG",
+            defaultDir=default_dir,
+            defaultFile=default_file,
+            wildcard="PNG image (*.png)|*.png",
+            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+        ) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return
+            export_path = dialog.GetPath()
+
+        if not export_path.lower().endswith(".png"):
+            export_path = export_path + ".png"
+
+        try:
+            if self.canvas.save_scope_image(export_path):
+                self.set_status("Exported oscilloscope to " + export_path)
+            else:
+                self.set_status("Could not export oscilloscope.", error=True)
+        except Exception as error:
+            wx.MessageBox(
+                "The oscilloscope image could not be exported.\n"
+                + str(error),
+                "Oscilloscope Export Error",
+                wx.OK | wx.ICON_ERROR,
+            )
+            self.set_status("Could not export oscilloscope.", error=True)
 
     def load_definition_file(self, path):
         """Replace the current simulator state with a parsed file."""
