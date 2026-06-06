@@ -106,6 +106,7 @@ def test_check_network(network_with_devices):
 
     # Inputs are unconnected, check_network() should return False
     assert not network.check_network()
+    assert network.get_unconnected_inputs() == [(OR1_ID, I1), (OR1_ID, I2)]
 
     # Make connections
     network.make_connection(SW1_ID, None, OR1_ID, I1)
@@ -113,6 +114,7 @@ def test_check_network(network_with_devices):
 
     # Inputs are now connected, check_network() should return True
     assert network.check_network()
+    assert network.get_unconnected_inputs() == []
 
 
 def test_make_connection(network_with_devices):
@@ -332,6 +334,32 @@ def test_execute_non_gates(new_network):
     assert [eval(sw1_output), eval(sw2_output), eval(sw3_output),
             eval(clock_output), eval(dtype_Q), eval(dtype_QBAR)] == [
                 HIGH, LOW, HIGH, HIGH, LOW, HIGH]
+
+
+def test_clock_starts_low_and_steps_consistently(new_network):
+    """Test if clocks cold-start low and follow a repeatable half period."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [clock_id] = names.lookup(["Clock1"])
+    devices.make_device(clock_id, devices.CLOCK, 2)
+
+    clock = devices.get_device(clock_id)
+    assert clock.outputs[None] == devices.LOW
+    assert clock.clock_counter == 0
+
+    trace = []
+    for _ in range(8):
+        assert network.execute_network()
+        trace.append(network.get_output_signal(clock_id, None))
+
+    assert trace == [
+        devices.LOW, devices.LOW,
+        devices.HIGH, devices.HIGH,
+        devices.LOW, devices.LOW,
+        devices.HIGH, devices.HIGH,
+    ]
 
 
 def test_oscillating_network(new_network):

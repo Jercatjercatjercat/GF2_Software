@@ -157,12 +157,17 @@ class Network:
 
     def check_network(self):
         """Return True if all inputs in the network are connected."""
+        return self.get_unconnected_inputs() == []
+
+    def get_unconnected_inputs(self):
+        """Return a list of all unconnected input signals."""
+        unconnected_inputs = []
         for device_id in self.devices.find_devices():
             device = self.devices.get_device(device_id)
             for input_id in device.inputs:
                 if self.get_connected_output(device_id, input_id) is None:
-                    return False
-        return True
+                    unconnected_inputs.append((device_id, input_id))
+        return unconnected_inputs
 
     def update_signal(self, signal, target):
         """Update the signal in the direction of the target.

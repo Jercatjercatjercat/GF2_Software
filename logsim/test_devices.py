@@ -76,16 +76,14 @@ def test_make_device(new_devices):
 
     assert nand_device.outputs == {None: new_devices.LOW}
 
-    # Clock could be anywhere in its cycle
-    assert clock_device.outputs in [{None: new_devices.LOW},
-                                    {None: new_devices.HIGH}]
+    assert clock_device.outputs == {None: new_devices.LOW}
 
     assert dtype_device.outputs == {new_devices.Q_ID: new_devices.LOW,
                                     new_devices.QBAR_ID: new_devices.LOW}
 
     assert clock_device.clock_half_period == 5
-    # Clock counter and D-type memory are initially at random states
-    assert clock_device.clock_counter in range(5)
+    assert clock_device.clock_counter == 0
+    # D-type memory is initially random.
     assert dtype_device.dtype_memory in [new_devices.LOW, new_devices.HIGH]
 
 

@@ -202,7 +202,7 @@ def test_parse_rejects_keyword_as_port_name_mismatch(tmp_path):
     assert not parser.parse_network()
 
 
-def test_parse_rejects_unconnected_input(tmp_path):
+def test_parse_rejects_unconnected_input(tmp_path, capsys):
     """Test if parser rejects networks with unconnected inputs."""
     parser, names, devices, network, monitors = make_parser(
         tmp_path,
@@ -219,6 +219,8 @@ def test_parse_rejects_unconnected_input(tmp_path):
     )
 
     assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "input G1.I2 is not connected" in output
 
 
 def test_parse_rejects_duplicate_monitor(tmp_path):
@@ -282,7 +284,7 @@ def test_parse_rejects_gate_input_count_outside_range(tmp_path):
     assert not parser.parse_network()
 
 
-def test_parse_rejects_undefined_device_in_connection(tmp_path):
+def test_parse_rejects_undefined_device_in_connection(tmp_path, capsys):
     """Test if parser rejects connections using undeclared devices."""
     parser, names, devices, network, monitors = make_parser(
         tmp_path,
@@ -299,9 +301,11 @@ def test_parse_rejects_undefined_device_in_connection(tmp_path):
     )
 
     assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "connection refers to undefined device SW2" in output
 
 
-def test_parse_rejects_undefined_device_in_monitor(tmp_path):
+def test_parse_rejects_undefined_device_in_monitor(tmp_path, capsys):
     """Test if parser rejects monitors using undeclared devices."""
     parser, names, devices, network, monitors = make_parser(
         tmp_path,
@@ -316,6 +320,8 @@ def test_parse_rejects_undefined_device_in_monitor(tmp_path):
     )
 
     assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "monitor refers to undefined device SW2" in output
 
 
 def test_parse_rejects_input_port_incompatible_with_device(tmp_path):

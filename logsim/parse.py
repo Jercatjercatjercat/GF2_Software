@@ -68,10 +68,7 @@ class Parser:
         self.expect_symbol(self.scanner.SEMICOLON, "expected ';' after END")
         self.expect_symbol(self.scanner.EOF, "expected end of file after END")
 
-        if not self.network.check_network():
-            self.report_semantic_error(
-                "one or more device inputs are unconnected"
-            )
+        self.report_unconnected_inputs()
 
         return self.error_count == 0
 
@@ -470,7 +467,10 @@ class Parser:
 
         if error == self.network.DEVICE_ABSENT:
             self.report_semantic_error(
-                "connection refers to an undefined device"
+                "connection refers to undefined device "
+                + self.undefined_connection_devices(
+                    output_device_id, input_device_id
+                )
             )
         elif error == self.network.INPUT_TO_INPUT:
             self.report_semantic_error(
@@ -524,6 +524,22 @@ class Parser:
         if port_name is None:
             port_name = "<unknown>"
         return device_name + "." + port_name
+
+    def undefined_connection_devices(self, output_device_id, input_device_id):
+        """Return the undefined device names used in a connection."""
+        undefined_devices = []
+        for device_id in [output_device_id, input_device_id]:
+            if self.devices.get_device(device_id) is None:
+                undefined_devices.append(self.names.get_name_string(device_id))
+        return ", ".join(undefined_devices)
+
+    def report_unconnected_inputs(self):
+        """Report each unconnected input by name."""
+        for device_id, input_id in self.network.get_unconnected_inputs():
+            self.report_semantic_error(
+                "input " + self.signal_name(device_id, input_id)
+                + " is not connected"
+            )
 
     def recover_to(self, stopping_types):
         """Skip symbols until one of the stopping symbol types is found."""

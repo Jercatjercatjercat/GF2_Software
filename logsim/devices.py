@@ -239,7 +239,7 @@ class Devices:
         self.add_device(device_id, self.CLOCK)
         device = self.get_device(device_id)
         device.clock_half_period = clock_half_period
-        self.cold_startup()  # clock initialised to a random point in its cycle
+        self.cold_startup()
 
     def make_gate(self, device_id, device_kind, no_of_inputs):
         """Make logic gates with the specified number of inputs."""
@@ -263,20 +263,18 @@ class Devices:
     def cold_startup(self):
         """Simulate cold start-up of D-types and clocks.
 
-        Set the memory of the D-types to a random state and make the clocks
-        begin from a random point in their cycles.
+        Set the memory of the D-types to a random state. Clocks start
+        deterministically low at the beginning of their cycle, so repeated
+        runs of the same network produce the same clock trace.
         """
         for device in self.devices_list:
             if device.device_kind == self.D_TYPE:
                 device.dtype_memory = random.choice([self.LOW, self.HIGH])
 
             elif device.device_kind == self.CLOCK:
-                clock_signal = random.choice([self.LOW, self.HIGH])
                 self.add_output(device.device_id, output_id=None,
-                                signal=clock_signal)
-                # Initialise it to a random point in its cycle.
-                device.clock_counter = \
-                    random.randrange(device.clock_half_period)
+                                signal=self.LOW)
+                device.clock_counter = 0
 
     def make_device(self, device_id, device_kind, device_property=None):
         """Create the specified device.
