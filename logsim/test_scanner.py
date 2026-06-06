@@ -178,6 +178,18 @@ def test_print_current_line_marks_position(tmp_path, names, capsys):
     assert output[1] == "      ^"
 
 
+def test_print_line_with_pointer_marks_given_location(tmp_path, names, capsys):
+    """Test if print_line_with_pointer marks an arbitrary source location."""
+    path = make_definition_file(tmp_path, "DEVICES {\n    SW1")
+    scanner = Scanner(path, names)
+
+    scanner.print_line_with_pointer(2, 5)
+
+    output = capsys.readouterr().out.splitlines()
+    assert output[0] == "    SW1"
+    assert output[1] == "    ^"
+
+
 def test_scanner_file_not_found_raises_oserror(names):
     """Test if scanner reports file-opening errors through OSError."""
     with pytest.raises(OSError):

@@ -156,6 +156,8 @@ class Scanner:
         }
 
         self.definition_file = open(path, encoding="utf-8")
+        self.source_lines = self.definition_file.readlines()
+        self.definition_file.seek(0)
         self.line_number = 1
         self.position = 0
         self.current_line = ""
@@ -302,3 +304,14 @@ class Scanner:
         line = self.current_line.rstrip("\n")
         print(line)
         print(" " * max(self.position - 1, 0) + "^")
+
+    def print_line_with_pointer(self, line_number, position):
+        """Print a source line and mark the given position with a caret."""
+        if line_number is None or position is None:
+            return
+        if line_number < 1 or line_number > len(self.source_lines):
+            return
+
+        line = self.source_lines[line_number - 1].rstrip("\n")
+        print(line)
+        print(" " * max(position - 1, 0) + "^")

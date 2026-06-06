@@ -360,11 +360,13 @@ class Parser:
         """Report a syntax error."""
         self.error_count += 1
         print(self.format_error("Syntax", message))
+        self.print_error_pointer()
 
     def report_semantic_error(self, message):
         """Report a semantic error."""
         self.error_count += 1
         print(self.format_error("Semantic", message))
+        self.print_error_pointer()
 
     def report_invalid_symbol(self):
         """Report an invalid scanner symbol."""
@@ -375,6 +377,12 @@ class Parser:
         return (
             f"{error_type} error at line {self.symbol.line_number}, "
             f"column {self.symbol.position}: {message}"
+        )
+
+    def print_error_pointer(self):
+        """Print the source line containing the current symbol with a caret."""
+        self.scanner.print_line_with_pointer(
+            self.symbol.line_number, self.symbol.position
         )
 
     def expect_symbol(self, symbol_type, error_message):

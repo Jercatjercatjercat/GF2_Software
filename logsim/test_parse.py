@@ -521,4 +521,26 @@ END;
         "Syntax error at line 2, column 1: "
         "invalid symbol: unterminated block comment"
     ) in output
+    assert "/* not properly closed\n^" in output
+
+
+def test_parse_prints_caret_under_syntax_error(tmp_path, capsys):
+    """Test if parser prints a caret under the reported syntax error."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+    123A : SWITCH(0);
+}
+CONNECT {
+}
+MONITOR {
+};
+END;
+        """,
+    )
+
+    assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "Syntax error at line 2, column 5" in output
+    assert "    123A : SWITCH(0);\n    ^" in output
 
