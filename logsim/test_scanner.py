@@ -115,6 +115,29 @@ def test_scanner_skips_open_and_closed_comments(tmp_path, names):
     ]
 
 
+def test_scanner_reports_unterminated_closed_comment(tmp_path, names):
+    """Test if scanner reports an unclosed block comment at its start."""
+    path = make_definition_file(
+        tmp_path,
+        """DEVICES {
+/* not properly closed
+   *./
+SW1 : SWITCH(1);
+}
+        """,
+    )
+    scanner = Scanner(path, names)
+
+    scanner.get_symbol()
+    scanner.get_symbol()
+    symbol = scanner.get_symbol()
+
+    assert symbol.type == scanner.INVALID
+    assert symbol.id == "unterminated block comment"
+    assert symbol.line_number == 2
+    assert symbol.position == 1
+
+
 def test_scanner_returns_invalid_symbol_for_unknown_character(tmp_path, names):
     """Test if scanner returns INVALID for an unsupported character."""
     path = make_definition_file(tmp_path, "@")

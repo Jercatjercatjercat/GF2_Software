@@ -160,6 +160,7 @@ class Scanner:
         self.position = 0
         self.current_line = ""
         self.current_character = ""
+        self.pending_symbol = None
         self.advance()
 
     def advance(self):
@@ -203,9 +204,19 @@ class Scanner:
                 skipping = True
 
             elif self.current_character == "/" and self.peek() == "*":
+                start_line = self.line_number
+                start_position = self.position
                 self.advance()
-                self.skip_closed_comment()
-                skipping = True
+                if self.skip_closed_comment():
+                    skipping = True
+                else:
+                    self.pending_symbol = Symbol(
+                        self.INVALID,
+                        "unterminated block comment",
+                        start_line,
+                        start_position,
+                    )
+                    return
 
     def skip_open_comment(self):
         """Skip from '#' to the end of the current line or file."""
@@ -213,15 +224,20 @@ class Scanner:
             self.advance()
 
     def skip_closed_comment(self):
-        """Skip from '/*' to the following '*/' or end of file."""
+        """Skip from '/*' to the following '*/'.
+
+        Return True if the closing delimiter is found, or False if the file
+        ends before the comment is closed.
+        """
         self.advance()
         previous_character = ""
         while self.current_character != "":
             if previous_character == "*" and self.current_character == "/":
                 self.advance()
-                return
+                return True
             previous_character = self.current_character
             self.advance()
+        return False
 
     def get_name(self):
         """Return a name string, leaving current character after the name."""
@@ -243,6 +259,11 @@ class Scanner:
     def get_symbol(self):
         """Translate the next sequence of characters into a symbol."""
         self.skip_spaces_and_comments()
+        if self.pending_symbol is not None:
+            symbol = self.pending_symbol
+            self.pending_symbol = None
+            return symbol
+
         line_number = self.line_number
         position = self.position
 

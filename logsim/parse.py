@@ -92,6 +92,9 @@ class Parser:
                     "device name must start with a letter"
                 )
                 self.recover_device_declaration()
+            elif self.symbol.type == self.scanner.INVALID:
+                self.report_invalid_symbol()
+                self.recover_device_declaration()
             else:
                 self.report_syntax_error("expected device declaration")
                 self.recover_device_declaration()
@@ -278,6 +281,10 @@ class Parser:
                         "expected ',' or '}' after monitor signal"
                     )
                     self.parse_monitor_signal()
+                elif self.symbol.type == self.scanner.INVALID:
+                    self.report_invalid_symbol()
+                    self.recover_to([self.scanner.COMMA,
+                                     self.scanner.RIGHT_BRACE])
                 else:
                     self.report_syntax_error(
                         "expected ',' or '}' after monitor signal"
@@ -314,6 +321,11 @@ class Parser:
             self.advance()
             return name_id
 
+        if self.symbol.type == self.scanner.INVALID:
+            self.report_invalid_symbol()
+            self.advance_if_needed()
+            return None
+
         self.report_syntax_error(error_message)
         self.advance_if_needed()
         return None
@@ -325,6 +337,11 @@ class Parser:
             keyword_id = self.symbol.id
             self.advance()
             return keyword_id
+
+        if self.symbol.type == self.scanner.INVALID:
+            self.report_invalid_symbol()
+            self.advance_if_needed()
+            return None
 
         self.report_syntax_error(error_message)
         self.advance_if_needed()
@@ -349,6 +366,10 @@ class Parser:
         self.error_count += 1
         print(self.format_error("Semantic", message))
 
+    def report_invalid_symbol(self):
+        """Report an invalid scanner symbol."""
+        self.report_syntax_error("invalid symbol: " + str(self.symbol.id))
+
     def format_error(self, error_type, message):
         """Return a formatted error message with source location."""
         return (
@@ -362,6 +383,11 @@ class Parser:
             self.advance()
             return True
 
+        if self.symbol.type == self.scanner.INVALID:
+            self.report_invalid_symbol()
+            self.advance_if_needed()
+            return False
+
         self.report_syntax_error(error_message)
         self.advance_if_needed()
         return False
@@ -371,6 +397,11 @@ class Parser:
         if self.is_keyword(keyword_id):
             self.advance()
             return True
+
+        if self.symbol.type == self.scanner.INVALID:
+            self.report_invalid_symbol()
+            self.advance_if_needed()
+            return False
 
         self.report_syntax_error(error_message)
         self.advance_if_needed()

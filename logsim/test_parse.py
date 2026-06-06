@@ -496,3 +496,29 @@ def test_parse_reports_missing_comma_in_monitor_list(tmp_path, capsys):
     assert "expected END" not in output
     assert "expected end of file after END" not in output
 
+
+def test_parse_reports_unterminated_closed_comment_location(
+        tmp_path, capsys):
+    """Test if parser reports an unclosed block comment at its start."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+/* not properly closed
+   *./
+SW1 : SWITCH(1);
+}
+CONNECT {
+}
+MONITOR {
+};
+END;
+        """,
+    )
+
+    assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert (
+        "Syntax error at line 2, column 1: "
+        "invalid symbol: unterminated block comment"
+    ) in output
+
