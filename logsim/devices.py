@@ -39,6 +39,8 @@ class Device:
         self.device_kind = None
         self.clock_half_period = None
         self.clock_counter = None
+        self.rc_delay = None
+        self.rc_counter = None
         self.switch_state = None
         self.dtype_memory = None
 
@@ -89,6 +91,8 @@ class Devices:
     make_gate(self, device_id, device_kind, no_of_inputs): Makes logic gates
                                         with the specified number of inputs.
 
+    make_rc(self, device_id, rc_delay): Makes an RC device.
+
     make_d_type(self, device_id): Makes a D-type device.
 
     cold_startup(self): Simulates cold start-up of D-types and clocks.
@@ -105,7 +109,7 @@ class Devices:
         self.devices_list = []
 
         gate_strings = ["AND", "OR", "NAND", "NOR", "XOR"]
-        device_strings = ["CLOCK", "SWITCH", "DTYPE"]
+        device_strings = ["CLOCK", "SWITCH", "RC", "DTYPE"]
         dtype_inputs = ["CLK", "SET", "CLEAR", "DATA"]
         dtype_outputs = ["Q", "QBAR"]
 
@@ -117,7 +121,7 @@ class Devices:
                              self.FALLING, self.BLANK] = range(5)
         self.gate_types = [self.AND, self.OR, self.NAND, self.NOR,
                            self.XOR] = self.names.lookup(gate_strings)
-        self.device_types = [self.CLOCK, self.SWITCH,
+        self.device_types = [self.CLOCK, self.SWITCH, self.RC,
                              self.D_TYPE] = self.names.lookup(device_strings)
         self.dtype_input_ids = [self.CLK_ID, self.SET_ID, self.CLEAR_ID,
                                 self.DATA_ID] = self.names.lookup(dtype_inputs)
@@ -241,6 +245,17 @@ class Devices:
         device.clock_half_period = clock_half_period
         self.cold_startup()
 
+    def make_rc(self, device_id, rc_delay):
+        """Make an RC power-up pulse device with the specified delay.
+
+        rc_delay is an integer > 0. The output starts HIGH on cold start-up
+        and falls LOW after rc_delay completed simulation cycles.
+        """
+        self.add_device(device_id, self.RC)
+        device = self.get_device(device_id)
+        device.rc_delay = rc_delay
+        self.cold_startup()
+
     def make_gate(self, device_id, device_kind, no_of_inputs):
         """Make logic gates with the specified number of inputs."""
         self.add_device(device_id, device_kind)
@@ -265,7 +280,8 @@ class Devices:
 
         Set the memory of the D-types to a random state. Clocks start
         deterministically low at the beginning of their cycle, so repeated
-        runs of the same network produce the same clock trace.
+        runs of the same network produce the same clock trace. RC devices
+        start HIGH at the beginning of their delay.
         """
         for device in self.devices_list:
             if device.device_kind == self.D_TYPE:
@@ -275,6 +291,11 @@ class Devices:
                 self.add_output(device.device_id, output_id=None,
                                 signal=self.LOW)
                 device.clock_counter = 0
+
+            elif device.device_kind == self.RC:
+                self.add_output(device.device_id, output_id=None,
+                                signal=self.HIGH)
+                device.rc_counter = 0
 
     def make_device(self, device_id, device_kind, device_property=None):
         """Create the specified device.
@@ -303,6 +324,16 @@ class Devices:
                 error_type = self.INVALID_QUALIFIER
             else:
                 self.make_clock(device_id, device_property)
+                error_type = self.NO_ERROR
+
+        elif device_kind == self.RC:
+            # Device property is the delay before the output falls LOW.
+            if device_property is None:
+                error_type = self.NO_QUALIFIER
+            elif device_property <= 0:
+                error_type = self.INVALID_QUALIFIER
+            else:
+                self.make_rc(device_id, device_property)
                 error_type = self.NO_ERROR
 
         elif device_kind in self.gate_types:

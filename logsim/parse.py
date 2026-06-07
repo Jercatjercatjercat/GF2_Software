@@ -141,6 +141,15 @@ class Parser:
                                "expected ')' after CLOCK period")
             return self.devices.CLOCK, half_period
 
+        if self.is_keyword(self.scanner.RC_ID):
+            self.advance()
+            self.expect_symbol(self.scanner.LEFT_PAREN,
+                               "expected '(' after RC")
+            delay = self.parse_positive_integer()
+            self.expect_symbol(self.scanner.RIGHT_PAREN,
+                               "expected ')' after RC delay")
+            return self.devices.RC, delay
+
         if self.is_gate_kind():
             device_kind = self.symbol.id
             self.advance()

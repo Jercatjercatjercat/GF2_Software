@@ -55,6 +55,7 @@ class Scanner:
     device_spec =
           "SWITCH" , "(" , bit , ")"
         | "CLOCK" , "(" , positive_integer , ")"
+        | "RC" , "(" , positive_integer , ")"
         | gate_kind , "(" , positive_integer , ")"
         | "DTYPE"
         | "XOR" ;
@@ -131,16 +132,16 @@ class Scanner:
         gate_inputs = ["I" + str(index) for index in range(1, 17)]
         self.keywords_list = [
             "DEVICES", "CONNECT", "MONITOR", "END", "SWITCH", "CLOCK",
-            "DTYPE", "XOR", "AND", "NAND", "OR", "NOR", "DATA", "CLK",
-            "SET", "CLEAR", "Q", "QBAR"
+            "RC", "DTYPE", "XOR", "AND", "NAND", "OR", "NOR", "DATA",
+            "CLK", "SET", "CLEAR", "Q", "QBAR"
         ] + gate_inputs
 
         [
             self.DEVICES_ID, self.CONNECT_ID, self.MONITOR_ID, self.END_ID,
-            self.SWITCH_ID, self.CLOCK_ID, self.DTYPE_ID, self.XOR_ID,
-            self.AND_ID, self.NAND_ID, self.OR_ID, self.NOR_ID,
-            self.DATA_ID, self.CLK_ID, self.SET_ID, self.CLEAR_ID,
-            self.Q_ID, self.QBAR_ID, *self.gate_input_ids
+            self.SWITCH_ID, self.CLOCK_ID, self.RC_ID, self.DTYPE_ID,
+            self.XOR_ID, self.AND_ID, self.NAND_ID, self.OR_ID,
+            self.NOR_ID, self.DATA_ID, self.CLK_ID, self.SET_ID,
+            self.CLEAR_ID, self.Q_ID, self.QBAR_ID, *self.gate_input_ids
         ] = self.names.lookup(self.keywords_list)
 
         self.punctuation = {

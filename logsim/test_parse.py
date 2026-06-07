@@ -147,6 +147,51 @@ def test_parse_valid_dtype_network(tmp_path):
     assert (d1_id, qbar_id) in monitors.monitors_dictionary
 
 
+def test_parse_valid_rc_power_up_pulse(tmp_path):
+    """Test if parser builds and runs an RC power-up pulse network."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            RESET_PULSE : RC(2);
+            CLK1 : CLOCK(4);
+            DATA_SW : SWITCH(0);
+            CLEAR_SW : SWITCH(0);
+            D1 : DTYPE;
+        }
+        CONNECT {
+            RESET_PULSE -> D1.SET;
+            CLK1 -> D1.CLK;
+            DATA_SW -> D1.DATA;
+            CLEAR_SW -> D1.CLEAR;
+        }
+        MONITOR { RESET_PULSE, D1.Q };
+        END;
+        """,
+    )
+
+    assert parser.parse_network()
+    [rc_id, d1_id, q_id, set_id] = names.lookup(
+        ["RESET_PULSE", "D1", "Q", "SET"]
+    )
+    assert devices.get_device(rc_id).device_kind == devices.RC
+    assert network.get_connected_output(d1_id, set_id) == (rc_id, None)
+
+    rc_trace = []
+    q_trace = []
+    for _ in range(4):
+        assert network.execute_network()
+        rc_trace.append(network.get_output_signal(rc_id, None))
+        q_trace.append(network.get_output_signal(d1_id, q_id))
+
+    assert rc_trace == [
+        devices.HIGH,
+        devices.HIGH,
+        devices.LOW,
+        devices.LOW,
+    ]
+    assert q_trace[0] == devices.HIGH
+
+
 def test_parse_rejects_empty_devices_section(tmp_path):
     """Test if parser rejects a DEVICES section with no devices."""
     parser, names, devices, network, monitors = make_parser(

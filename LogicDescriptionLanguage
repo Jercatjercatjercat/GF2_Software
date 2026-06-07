@@ -21,6 +21,7 @@ device_decl =
 device_spec =
       "SWITCH" , "(" , bit , ")"
     | "CLOCK" , "(" , positive_integer , ")"
+    | "RC" , "(" , positive_integer , ")"
     | gate_kind , "(" , positive_integer , ")"
     | "DTYPE"
     | "XOR" ;
@@ -93,6 +94,10 @@ G1.I16 is syntactically an input signal, but if G1 is declared as NAND(2), then
 G1.I16 is semantically invalid. Similarly, D1.DATA is syntactically an input
 signal, but it is only semantically valid when D1 is a DTYPE.
 
+The RC device has one output and no inputs. On cold start-up its output is
+HIGH, and after the positive integer delay has elapsed it falls LOW. This is
+useful for driving DTYPE SET or CLEAR inputs during power-up.
+
 The DEVICES section now requires at least one device:
 
 devices_section =
@@ -105,12 +110,14 @@ Device parameters have also been shortened. Instead of:
 
 SW1 : SWITCH(initial = 0);
 CLK1 : CLOCK(period = 4);
+RESET1 : RC(delay = 3);
 G1 : NAND(inputs = 2);
 
 the revised language uses:
 
 SW1 : SWITCH(0);
 CLK1 : CLOCK(4);
+RESET1 : RC(3);
 G1 : NAND(2);
 
 This is less wordy while remaining readable because the device type determines

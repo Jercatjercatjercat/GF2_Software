@@ -80,17 +80,18 @@ def test_scanner_recognises_definition_symbols(tmp_path, names):
 
 def test_scanner_distinguishes_keywords_and_names(tmp_path, names):
     """Test if reserved words are keywords and other words are names."""
-    path = make_definition_file(tmp_path, "DEVICES SW1 DATA_SW DATA I16")
+    path = make_definition_file(tmp_path, "DEVICES SW1 DATA_SW DATA I16 RC")
     scanner = Scanner(path, names)
     symbols = collect_symbols(scanner)
 
     assert [symbol.type for symbol in symbols[:-1]] == [
         scanner.KEYWORD, scanner.NAME, scanner.NAME,
-        scanner.KEYWORD, scanner.KEYWORD,
+        scanner.KEYWORD, scanner.KEYWORD, scanner.KEYWORD,
     ]
     assert names.get_name_string(symbols[1].id) == "SW1"
     assert names.get_name_string(symbols[2].id) == "DATA_SW"
     assert names.get_name_string(symbols[3].id) == "DATA"
+    assert names.get_name_string(symbols[5].id) == "RC"
 
 
 def test_scanner_skips_open_and_closed_comments(tmp_path, names):

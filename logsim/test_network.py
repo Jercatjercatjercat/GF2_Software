@@ -362,6 +362,33 @@ def test_clock_starts_low_and_steps_consistently(new_network):
     ]
 
 
+def test_rc_starts_high_and_falls_after_delay(new_network):
+    """Test if RC outputs give a repeatable power-up pulse."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [rc_id] = names.lookup(["ResetPulse"])
+    devices.make_device(rc_id, devices.RC, 2)
+
+    rc_device = devices.get_device(rc_id)
+    assert rc_device.outputs[None] == devices.HIGH
+    assert rc_device.rc_counter == 0
+
+    trace = []
+    for _ in range(5):
+        assert network.execute_network()
+        trace.append(network.get_output_signal(rc_id, None))
+
+    assert trace == [
+        devices.HIGH,
+        devices.HIGH,
+        devices.LOW,
+        devices.LOW,
+        devices.LOW,
+    ]
+
+
 def test_oscillating_network(new_network):
     """Test if the execute_network returns False for oscillating networks."""
     network = new_network
