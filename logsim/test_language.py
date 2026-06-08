@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from language import (
     choose_language,
     language_from_environment,
+    load_language_names,
     load_translations,
     normalise_language_code,
     translate,
@@ -80,6 +81,18 @@ def test_catalogue_contains_non_latin_sample():
 def test_catalogue_contains_arabic_language():
     """Test if the catalogue contains Arabic GUI labels."""
     translations = load_translations()
+    language_names = load_language_names()
 
-    assert translations["ar"]["window_title"] == "محاكي المنطق"
-    assert translations["ar"]["language"] == "اللغة"
+    assert language_names["ar"] == "\u0627\u0644\u0639\u0631\u0628\u064a\u0629"
+    assert translations["ar"]["window_title"] == (
+        "\u0645\u062d\u0627\u0643\u064a "
+        "\u0627\u0644\u0645\u0646\u0637\u0642"
+    )
+    assert translations["ar"]["language"] == "\u0627\u0644\u0644\u063a\u0629"
+
+
+def test_arabic_translation_has_complete_gui_key_set():
+    """Test if Arabic translates every English GUI text key."""
+    translations = load_translations()
+
+    assert set(translations["ar"]) == set(translations["en"])
