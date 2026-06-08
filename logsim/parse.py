@@ -9,6 +9,8 @@ Classes
 Parser - parses the definition file and builds the logic network.
 """
 
+from typing import Sequence
+
 
 class Parser:
     """Parse the definition file and build the logic network.
@@ -28,9 +30,16 @@ class Parser:
     Public methods
     --------------
     parse_network(self): Parses the circuit definition file.
+
+    Notes
+    -----
+    Helper methods are private because parsing is driven only through
+    parse_network(). They are kept small to mirror the grammar rules and to
+    keep syntax checks separate from semantic checks.
     """
 
-    def __init__(self, names, devices, network, monitors, scanner):
+    def __init__(self, names: object, devices: object, network: object,
+                 monitors: object, scanner: object) -> None:
         """Initialise parser state."""
         self.names = names
         self.devices = devices
@@ -56,170 +65,177 @@ class Parser:
             self.scanner.gate_input_ids + self.dtype_input_ids
         )
 
-    def parse_network(self):
+    def parse_network(self) -> bool:
         """Parse the circuit definition file."""
-        self.advance()
+        self._advance()
 
-        self.parse_devices_section()
-        self.parse_connections_section()
-        self.parse_monitors_section()
+        # The top-level order follows the LDL grammar exactly.
+        self._parse_devices_section()
+        self._parse_connections_section()
+        self._parse_monitors_section()
 
-        self.expect_keyword(self.scanner.END_ID, "expected END")
-        self.expect_symbol(self.scanner.SEMICOLON, "expected ';' after END")
-        self.expect_symbol(self.scanner.EOF, "expected end of file after END")
+        self._expect_keyword(self.scanner.END_ID, "expected END")
+        self._expect_symbol(self.scanner.SEMICOLON, "expected ';' after END")
+        self._expect_symbol(self.scanner.EOF, "expected end of file after END")
 
-        self.report_unconnected_inputs()
+        self._report_unconnected_inputs()
 
         return self.error_count == 0
 
-    def parse_devices_section(self):
+    def _parse_devices_section(self) -> None:
         """Parse the DEVICES section."""
-        self.expect_keyword(self.scanner.DEVICES_ID, "expected DEVICES")
-        self.expect_symbol(self.scanner.LEFT_BRACE,
-                           "expected '{' after DEVICES")
+        self._expect_keyword(self.scanner.DEVICES_ID, "expected DEVICES")
+        self._expect_symbol(self.scanner.LEFT_BRACE,
+                            "expected '{' after DEVICES")
 
         device_count = 0
         while self.symbol.type not in [self.scanner.RIGHT_BRACE,
                                        self.scanner.EOF]:
+            # Recover one declaration at a time so that later sections can
+            # still be parsed and useful errors can still be reported.
             if self.symbol.type == self.scanner.NAME:
-                self.parse_device_decl()
+                self._parse_device_decl()
                 device_count += 1
             elif self.symbol.type == self.scanner.NUMBER:
-                self.report_syntax_error(
+                self._report_syntax_error(
                     "device name must start with a letter"
                 )
-                self.recover_device_declaration()
+                self._recover_device_declaration()
             elif self.symbol.type == self.scanner.INVALID:
-                self.report_invalid_symbol()
-                self.recover_device_declaration()
+                self._report_invalid_symbol()
+                self._recover_device_declaration()
             else:
-                self.report_syntax_error("expected device declaration")
-                self.recover_device_declaration()
+                self._report_syntax_error("expected device declaration")
+                self._recover_device_declaration()
 
         if device_count == 0:
-            self.report_syntax_error(
+            self._report_syntax_error(
                 "expected at least one device declaration"
             )
 
-        self.expect_symbol(self.scanner.RIGHT_BRACE,
-                           "expected '}' after devices")
+        self._expect_symbol(self.scanner.RIGHT_BRACE,
+                            "expected '}' after devices")
 
-    def parse_device_decl(self):
+    def _parse_device_decl(self) -> None:
         """Parse one device declaration and create the device."""
-        device_id = self.parse_name("expected device name")
-        self.expect_symbol(self.scanner.COLON,
-                           "expected ':' after device name")
-        device_kind, device_property = self.parse_device_spec()
-        self.expect_symbol(self.scanner.SEMICOLON,
-                           "expected ';' after device")
+        device_id = self._parse_name("expected device name")
+        self._expect_symbol(self.scanner.COLON,
+                            "expected ':' after device name")
+        device_kind, device_property = self._parse_device_spec()
+        self._expect_symbol(self.scanner.SEMICOLON,
+                            "expected ';' after device")
 
         if device_id is None or device_kind is None:
             return
 
+        # Once the declaration syntax is valid, Devices performs semantic
+        # checks such as duplicate names and invalid properties.
         error = self.devices.make_device(
             device_id, device_kind, device_property
         )
-        self.handle_device_error(error, device_id)
+        self._handle_device_error(error, device_id)
 
-    def parse_device_spec(self):
+    def _parse_device_spec(self) -> tuple[int | None, int | None]:
         """Parse a device specification and return kind and property."""
-        if self.is_keyword(self.scanner.SWITCH_ID):
-            self.advance()
-            self.expect_symbol(self.scanner.LEFT_PAREN,
-                               "expected '(' after SWITCH")
-            initial_state = self.parse_bit()
-            self.expect_symbol(self.scanner.RIGHT_PAREN,
-                               "expected ')' after SWITCH value")
+        if self._is_keyword(self.scanner.SWITCH_ID):
+            self._advance()
+            self._expect_symbol(self.scanner.LEFT_PAREN,
+                                "expected '(' after SWITCH")
+            initial_state = self._parse_bit()
+            self._expect_symbol(self.scanner.RIGHT_PAREN,
+                                "expected ')' after SWITCH value")
             return self.devices.SWITCH, initial_state
 
-        if self.is_keyword(self.scanner.CLOCK_ID):
-            self.advance()
-            self.expect_symbol(self.scanner.LEFT_PAREN,
-                               "expected '(' after CLOCK")
-            half_period = self.parse_positive_integer()
-            self.expect_symbol(self.scanner.RIGHT_PAREN,
-                               "expected ')' after CLOCK period")
+        if self._is_keyword(self.scanner.CLOCK_ID):
+            self._advance()
+            self._expect_symbol(self.scanner.LEFT_PAREN,
+                                "expected '(' after CLOCK")
+            half_period = self._parse_positive_integer()
+            self._expect_symbol(self.scanner.RIGHT_PAREN,
+                                "expected ')' after CLOCK period")
             return self.devices.CLOCK, half_period
 
-        if self.is_keyword(self.scanner.RC_ID):
-            self.advance()
-            self.expect_symbol(self.scanner.LEFT_PAREN,
-                               "expected '(' after RC")
-            delay = self.parse_positive_integer()
-            self.expect_symbol(self.scanner.RIGHT_PAREN,
-                               "expected ')' after RC delay")
+        if self._is_keyword(self.scanner.RC_ID):
+            self._advance()
+            self._expect_symbol(self.scanner.LEFT_PAREN,
+                                "expected '(' after RC")
+            delay = self._parse_positive_integer()
+            self._expect_symbol(self.scanner.RIGHT_PAREN,
+                                "expected ')' after RC delay")
             return self.devices.RC, delay
 
-        if self.is_gate_kind():
+        if self._is_gate_kind():
             device_kind = self.symbol.id
-            self.advance()
-            self.expect_symbol(self.scanner.LEFT_PAREN,
-                               "expected '(' after gate type")
-            input_count = self.parse_positive_integer()
-            self.expect_symbol(self.scanner.RIGHT_PAREN,
-                               "expected ')' after gate input count")
+            self._advance()
+            self._expect_symbol(self.scanner.LEFT_PAREN,
+                                "expected '(' after gate type")
+            input_count = self._parse_positive_integer()
+            self._expect_symbol(self.scanner.RIGHT_PAREN,
+                                "expected ')' after gate input count")
             return device_kind, input_count
 
-        if self.is_keyword(self.scanner.DTYPE_ID):
-            self.advance()
+        if self._is_keyword(self.scanner.DTYPE_ID):
+            self._advance()
             return self.devices.D_TYPE, None
 
-        if self.is_keyword(self.scanner.XOR_ID):
-            self.advance()
+        if self._is_keyword(self.scanner.XOR_ID):
+            self._advance()
             return self.devices.XOR, None
 
-        self.report_syntax_error("expected device type")
+        self._report_syntax_error("expected device type")
         return None, None
 
-    def parse_bit(self):
+    def _parse_bit(self) -> int | None:
         """Parse a bit value, either 0 or 1."""
         if (self.symbol.type == self.scanner.NUMBER and
                 self.symbol.id in [0, 1]):
             value = self.symbol.id
-            self.advance()
+            self._advance()
             return value
 
-        self.report_syntax_error("expected bit value 0 or 1")
-        self.advance_if_needed()
+        self._report_syntax_error("expected bit value 0 or 1")
+        self._advance_if_needed()
         return None
 
-    def parse_positive_integer(self):
+    def _parse_positive_integer(self) -> int | None:
         """Parse a positive integer."""
         if self.symbol.type == self.scanner.NUMBER and self.symbol.id > 0:
             value = self.symbol.id
-            self.advance()
+            self._advance()
             return value
 
-        self.report_syntax_error("expected positive integer")
-        self.advance_if_needed()
+        self._report_syntax_error("expected positive integer")
+        self._advance_if_needed()
         return None
 
-    def parse_connections_section(self):
+    def _parse_connections_section(self) -> None:
         """Parse the CONNECT section."""
-        self.expect_keyword(self.scanner.CONNECT_ID, "expected CONNECT")
-        self.expect_symbol(self.scanner.LEFT_BRACE,
-                           "expected '{' after CONNECT")
+        self._expect_keyword(self.scanner.CONNECT_ID, "expected CONNECT")
+        self._expect_symbol(self.scanner.LEFT_BRACE,
+                            "expected '{' after CONNECT")
 
         while self.symbol.type == self.scanner.NAME:
-            self.parse_connection_decl()
+            self._parse_connection_decl()
 
-        self.expect_symbol(self.scanner.RIGHT_BRACE,
-                           "expected '}' after connections")
+        self._expect_symbol(self.scanner.RIGHT_BRACE,
+                            "expected '}' after connections")
 
-    def parse_connection_decl(self):
+    def _parse_connection_decl(self) -> None:
         """Parse one connection declaration and make the connection."""
-        output_device_id, output_port_id = self.parse_output_signal()
-        self.expect_symbol(self.scanner.ARROW, "expected '->' in connection")
-        input_device_id, input_port_id = self.parse_input_signal()
-        self.expect_symbol(self.scanner.SEMICOLON,
+        output_device_id, output_port_id = self._parse_output_signal()
+        self._expect_symbol(self.scanner.ARROW, "expected '->' in connection")
+        input_device_id, input_port_id = self._parse_input_signal()
+        self._expect_symbol(self.scanner.SEMICOLON,
                            "expected ';' after connection")
 
         if None in [output_device_id, input_device_id, input_port_id]:
             return
 
-        if self.is_ambiguous_dtype_output(output_device_id, output_port_id):
+        # A bare DTYPE name is syntactically an output signal, but semantically
+        # ambiguous because DTYPE has both Q and QBAR outputs.
+        if self._is_ambiguous_dtype_output(output_device_id, output_port_id):
             device_name = self.names.get_name_string(output_device_id)
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "DTYPE output must be specified as "
                 + device_name + ".Q or " + device_name + ".QBAR"
             )
@@ -228,300 +244,307 @@ class Parser:
         error = self.network.make_connection(
             output_device_id, output_port_id, input_device_id, input_port_id
         )
-        self.handle_connection_error(
+        self._handle_connection_error(
             error, output_device_id, output_port_id,
             input_device_id, input_port_id
         )
 
-    def parse_input_signal(self):
+    def _parse_input_signal(self) -> tuple[int | None, int | None]:
         """Parse an input signal and return device and input IDs."""
-        device_id = self.parse_name("expected input device name")
-        self.expect_symbol(self.scanner.DOT, "expected '.' in input signal")
-        input_id = self.parse_input_port()
+        device_id = self._parse_name("expected input device name")
+        self._expect_symbol(self.scanner.DOT, "expected '.' in input signal")
+        input_id = self._parse_input_port()
         return device_id, input_id
 
-    def parse_input_port(self):
+    def _parse_input_port(self) -> int | None:
         """Parse an input port keyword and return its ID."""
-        return self.parse_keyword_from(
+        return self._parse_keyword_from(
             self.input_port_ids, "expected input port"
         )
 
-    def parse_output_signal(self):
+    def _parse_output_signal(self) -> tuple[int | None, int | None]:
         """Parse an output signal and return device and output IDs."""
-        device_id = self.parse_name("expected output device name")
+        device_id = self._parse_name("expected output device name")
         output_id = None
 
         if self.symbol.type == self.scanner.DOT:
-            self.advance()
-            output_id = self.parse_output_port()
+            self._advance()
+            output_id = self._parse_output_port()
 
         return device_id, output_id
 
-    def parse_output_port(self):
+    def _parse_output_port(self) -> int | None:
         """Parse a DTYPE output port keyword and return its ID."""
-        return self.parse_keyword_from(
+        return self._parse_keyword_from(
             self.dtype_output_ids, "expected output port Q or QBAR"
         )
 
-    def parse_monitors_section(self):
+    def _parse_monitors_section(self) -> None:
         """Parse the MONITOR section and create monitors."""
-        self.expect_keyword(self.scanner.MONITOR_ID, "expected MONITOR")
-        self.expect_symbol(self.scanner.LEFT_BRACE,
-                           "expected '{' after MONITOR")
+        self._expect_keyword(self.scanner.MONITOR_ID, "expected MONITOR")
+        self._expect_symbol(self.scanner.LEFT_BRACE,
+                            "expected '{' after MONITOR")
 
         if self.symbol.type == self.scanner.NAME:
-            self.parse_monitor_signal()
+            self._parse_monitor_signal()
 
             while self.symbol.type not in [self.scanner.RIGHT_BRACE,
                                            self.scanner.EOF]:
+                # Monitor lists are comma-separated. If a comma is missing,
+                # parse the next signal after reporting the local error.
                 if self.symbol.type == self.scanner.COMMA:
-                    self.advance()
+                    self._advance()
                     if self.symbol.type == self.scanner.RIGHT_BRACE:
-                        self.report_syntax_error(
+                        self._report_syntax_error(
                             "expected monitor signal after ','"
                         )
                     else:
-                        self.parse_monitor_signal()
+                        self._parse_monitor_signal()
                 elif self.symbol.type == self.scanner.NAME:
-                    self.report_syntax_error(
+                    self._report_syntax_error(
                         "expected ',' or '}' after monitor signal"
                     )
-                    self.parse_monitor_signal()
+                    self._parse_monitor_signal()
                 elif self.symbol.type == self.scanner.INVALID:
-                    self.report_invalid_symbol()
-                    self.recover_to([self.scanner.COMMA,
-                                     self.scanner.RIGHT_BRACE])
+                    self._report_invalid_symbol()
+                    self._recover_to([self.scanner.COMMA,
+                                      self.scanner.RIGHT_BRACE])
                 else:
-                    self.report_syntax_error(
+                    self._report_syntax_error(
                         "expected ',' or '}' after monitor signal"
                     )
-                    self.recover_to([self.scanner.COMMA,
-                                     self.scanner.RIGHT_BRACE])
+                    self._recover_to([self.scanner.COMMA,
+                                      self.scanner.RIGHT_BRACE])
 
-        self.expect_symbol(self.scanner.RIGHT_BRACE,
-                           "expected '}' after monitors")
-        self.expect_symbol(self.scanner.SEMICOLON,
-                           "expected ';' after MONITOR section")
+        self._expect_symbol(self.scanner.RIGHT_BRACE,
+                            "expected '}' after monitors")
+        self._expect_symbol(self.scanner.SEMICOLON,
+                            "expected ';' after MONITOR section")
 
-    def parse_monitor_signal(self):
+    def _parse_monitor_signal(self) -> None:
         """Parse one monitor signal and create the monitor."""
-        device_id, output_id = self.parse_output_signal()
+        device_id, output_id = self._parse_output_signal()
         if device_id is None:
             return
 
-        if self.is_ambiguous_dtype_output(device_id, output_id):
+        if self._is_ambiguous_dtype_output(device_id, output_id):
             device_name = self.names.get_name_string(device_id)
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "DTYPE output must be specified as "
                 + device_name + ".Q or " + device_name + ".QBAR"
             )
             return
 
         error = self.monitors.make_monitor(device_id, output_id)
-        self.handle_monitor_error(error, device_id, output_id)
+        self._handle_monitor_error(error, device_id, output_id)
 
-    def parse_name(self, error_message):
+    def _parse_name(self, error_message: str) -> int | None:
         """Parse a user-defined name and return its ID."""
         if self.symbol.type == self.scanner.NAME:
             name_id = self.symbol.id
-            self.advance()
+            self._advance()
             return name_id
 
         if self.symbol.type == self.scanner.INVALID:
-            self.report_invalid_symbol()
-            self.advance_if_needed()
+            self._report_invalid_symbol()
+            self._advance_if_needed()
             return None
 
-        self.report_syntax_error(error_message)
-        self.advance_if_needed()
+        self._report_syntax_error(error_message)
+        self._advance_if_needed()
         return None
 
-    def parse_keyword_from(self, accepted_ids, error_message):
+    def _parse_keyword_from(self, accepted_ids: Sequence[int],
+                            error_message: str) -> int | None:
         """Parse one keyword from accepted_ids and return its ID."""
         if (self.symbol.type == self.scanner.KEYWORD and
                 self.symbol.id in accepted_ids):
             keyword_id = self.symbol.id
-            self.advance()
+            self._advance()
             return keyword_id
 
         if self.symbol.type == self.scanner.INVALID:
-            self.report_invalid_symbol()
-            self.advance_if_needed()
+            self._report_invalid_symbol()
+            self._advance_if_needed()
             return None
 
-        self.report_syntax_error(error_message)
-        self.advance_if_needed()
+        self._report_syntax_error(error_message)
+        self._advance_if_needed()
         return None
 
-    def advance(self):
+    def _advance(self) -> None:
         """Advance to the next symbol from the scanner."""
         self.symbol = self.scanner.get_symbol()
 
-    def advance_if_needed(self):
+    def _advance_if_needed(self) -> None:
         """Advance unless already at end of file."""
         if self.symbol.type != self.scanner.EOF:
-            self.advance()
+            self._advance()
 
-    def report_syntax_error(self, message):
+    def _report_syntax_error(self, message: str) -> None:
         """Report a syntax error."""
         self.error_count += 1
-        print(self.format_error("Syntax", message))
-        self.print_error_pointer()
+        print(self._format_error("Syntax", message))
+        self._print_error_pointer()
 
-    def report_semantic_error(self, message):
+    def _report_semantic_error(self, message: str) -> None:
         """Report a semantic error."""
         self.error_count += 1
-        print(self.format_error("Semantic", message))
-        self.print_error_pointer()
+        print(self._format_error("Semantic", message))
+        self._print_error_pointer()
 
-    def report_invalid_symbol(self):
+    def _report_invalid_symbol(self) -> None:
         """Report an invalid scanner symbol."""
-        self.report_syntax_error("invalid symbol: " + str(self.symbol.id))
+        self._report_syntax_error("invalid symbol: " + str(self.symbol.id))
 
-    def format_error(self, error_type, message):
+    def _format_error(self, error_type: str, message: str) -> str:
         """Return a formatted error message with source location."""
         return (
             f"{error_type} error at line {self.symbol.line_number}, "
             f"column {self.symbol.position}: {message}"
         )
 
-    def print_error_pointer(self):
+    def _print_error_pointer(self) -> None:
         """Print the source line containing the current symbol with a caret."""
         self.scanner.print_line_with_pointer(
             self.symbol.line_number, self.symbol.position
         )
 
-    def expect_symbol(self, symbol_type, error_message):
+    def _expect_symbol(self, symbol_type: int, error_message: str) -> bool:
         """Check that the current symbol has the expected type."""
         if self.symbol.type == symbol_type:
-            self.advance()
+            self._advance()
             return True
 
         if self.symbol.type == self.scanner.INVALID:
-            self.report_invalid_symbol()
-            self.advance_if_needed()
+            self._report_invalid_symbol()
+            self._advance_if_needed()
             return False
 
-        self.report_syntax_error(error_message)
-        self.advance_if_needed()
+        self._report_syntax_error(error_message)
+        self._advance_if_needed()
         return False
 
-    def expect_keyword(self, keyword_id, error_message):
+    def _expect_keyword(self, keyword_id: int, error_message: str) -> bool:
         """Check that the current symbol is the expected keyword."""
-        if self.is_keyword(keyword_id):
-            self.advance()
+        if self._is_keyword(keyword_id):
+            self._advance()
             return True
 
         if self.symbol.type == self.scanner.INVALID:
-            self.report_invalid_symbol()
-            self.advance_if_needed()
+            self._report_invalid_symbol()
+            self._advance_if_needed()
             return False
 
-        self.report_syntax_error(error_message)
-        self.advance_if_needed()
+        self._report_syntax_error(error_message)
+        self._advance_if_needed()
         return False
 
-    def is_keyword(self, keyword_id):
+    def _is_keyword(self, keyword_id: int) -> bool:
         """Return True if the current symbol is the specified keyword."""
         return (self.symbol.type == self.scanner.KEYWORD and
                 self.symbol.id == keyword_id)
 
-    def is_gate_kind(self):
+    def _is_gate_kind(self) -> bool:
         """Return True if the current symbol is a logic gate keyword."""
         return (self.symbol.type == self.scanner.KEYWORD and
                 self.symbol.id in self.gate_type_ids)
 
-    def is_ambiguous_dtype_output(self, device_id, output_id):
+    def _is_ambiguous_dtype_output(self, device_id: int,
+                                   output_id: int | None) -> bool:
         """Return True if a DTYPE output has been used without Q or QBAR."""
         device = self.devices.get_device(device_id)
         return (device is not None and
                 device.device_kind == self.devices.D_TYPE and
                 output_id is None)
 
-    def handle_device_error(self, error, device_id):
+    def _handle_device_error(self, error: int, device_id: int) -> None:
         """Report semantic errors returned by Devices.make_device."""
         if error == self.devices.NO_ERROR:
             return
 
         device_name = self.names.get_name_string(device_id)
         if error == self.devices.DEVICE_PRESENT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "device name " + device_name + " is already defined"
             )
         elif error == self.devices.INVALID_QUALIFIER:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "invalid property for device " + device_name
             )
         elif error == self.devices.NO_QUALIFIER:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "missing required property for device " + device_name
             )
         elif error == self.devices.QUALIFIER_PRESENT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "unexpected property for device " + device_name
             )
         elif error == self.devices.BAD_DEVICE:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "invalid device type for " + device_name
             )
 
-    def handle_connection_error(self, error, output_device_id, output_port_id,
-                                input_device_id, input_port_id):
+    def _handle_connection_error(self, error: int, output_device_id: int,
+                                 output_port_id: int | None,
+                                 input_device_id: int,
+                                 input_port_id: int) -> None:
         """Report semantic errors returned by Network.make_connection."""
         if error == self.network.NO_ERROR:
             return
 
-        output_name = self.signal_name(output_device_id, output_port_id)
-        input_name = self.signal_name(input_device_id, input_port_id)
+        output_name = self._signal_name(output_device_id, output_port_id)
+        input_name = self._signal_name(input_device_id, input_port_id)
 
         if error == self.network.DEVICE_ABSENT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "connection refers to undefined device "
-                + self.undefined_connection_devices(
+                + self._undefined_connection_devices(
                     output_device_id, input_device_id
                 )
             )
         elif error == self.network.INPUT_TO_INPUT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 output_name + " is an input and cannot be a connection source"
             )
         elif error == self.network.OUTPUT_TO_OUTPUT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 input_name + " is an output and cannot be a connection "
                 "destination"
             )
         elif error == self.network.INPUT_CONNECTED:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "input " + input_name + " is connected more than once"
             )
         elif error == self.network.PORT_ABSENT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "invalid port in connection " + output_name + " -> "
                 + input_name
             )
 
-    def handle_monitor_error(self, error, device_id, output_id):
+    def _handle_monitor_error(self, error: int, device_id: int,
+                              output_id: int | None) -> None:
         """Report semantic errors returned by Monitors.make_monitor."""
         if error == self.monitors.NO_ERROR:
             return
 
-        signal_name = self.signal_name(device_id, output_id)
+        monitor_name = self._signal_name(device_id, output_id)
         if error == self.network.DEVICE_ABSENT:
-            self.report_semantic_error(
+            self._report_semantic_error(
                 "monitor refers to undefined device "
                 + self.names.get_name_string(device_id)
             )
         elif error == self.monitors.NOT_OUTPUT:
-            self.report_semantic_error(
-                signal_name + " cannot be monitored because it is not an "
+            self._report_semantic_error(
+                monitor_name + " cannot be monitored because it is not an "
                 "output"
             )
         elif error == self.monitors.MONITOR_PRESENT:
-            self.report_semantic_error(
-                "monitor point " + signal_name + " is listed more than once"
+            self._report_semantic_error(
+                "monitor point " + monitor_name + " is listed more than once"
             )
 
-    def signal_name(self, device_id, port_id):
+    def _signal_name(self, device_id: int, port_id: int | None) -> str:
         """Return a readable signal name from IDs."""
         device_name = self.names.get_name_string(device_id)
         if device_name is None:
@@ -534,7 +557,8 @@ class Parser:
             port_name = "<unknown>"
         return device_name + "." + port_name
 
-    def undefined_connection_devices(self, output_device_id, input_device_id):
+    def _undefined_connection_devices(self, output_device_id: int,
+                                      input_device_id: int) -> str:
         """Return the undefined device names used in a connection."""
         undefined_devices = []
         for device_id in [output_device_id, input_device_id]:
@@ -542,22 +566,22 @@ class Parser:
                 undefined_devices.append(self.names.get_name_string(device_id))
         return ", ".join(undefined_devices)
 
-    def report_unconnected_inputs(self):
+    def _report_unconnected_inputs(self) -> None:
         """Report each unconnected input by name."""
         for device_id, input_id in self.network.get_unconnected_inputs():
-            self.report_semantic_error(
-                "input " + self.signal_name(device_id, input_id)
+            self._report_semantic_error(
+                "input " + self._signal_name(device_id, input_id)
                 + " is not connected"
             )
 
-    def recover_to(self, stopping_types):
+    def _recover_to(self, stopping_types: Sequence[int]) -> None:
         """Skip symbols until one of the stopping symbol types is found."""
         while (self.symbol.type not in stopping_types and
                self.symbol.type != self.scanner.EOF):
-            self.advance()
+            self._advance()
 
-    def recover_device_declaration(self):
+    def _recover_device_declaration(self) -> None:
         """Skip a malformed device declaration and consume its semicolon."""
-        self.recover_to([self.scanner.SEMICOLON, self.scanner.RIGHT_BRACE])
+        self._recover_to([self.scanner.SEMICOLON, self.scanner.RIGHT_BRACE])
         if self.symbol.type == self.scanner.SEMICOLON:
-            self.advance()
+            self._advance()
