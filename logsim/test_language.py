@@ -7,6 +7,7 @@ from language import (
     choose_language,
     language_from_environment,
     language_from_python_locale,
+    language_from_windows_locale,
     load_language_names,
     load_translations,
     normalise_language_code,
@@ -20,6 +21,7 @@ def test_normalise_language_code_reads_locale_prefix():
     assert normalise_language_code("es_ES.utf8") == "es"
     assert normalise_language_code("de-DE") == "de"
     assert normalise_language_code("ar-EG") == "ar"
+    assert normalise_language_code("Spanish_Spain") == "es"
     assert normalise_language_code("C") is None
 
 
@@ -121,6 +123,137 @@ def test_logsim_detects_startup_language_before_wx_starts():
     assert detect_startup_language({}, FakeLocaleModule) == "es"
 
 
+def test_choose_language_uses_windows_display_language():
+    """Test if Windows UI locale can select Spanish at startup."""
+    translations = load_translations()
+
+    class NoLocaleModule:
+        """Small stand-in for an unset Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return no active locale."""
+            return None, None
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return no default locale."""
+            return None, None
+
+    class FakeWindowsApi:
+        """Small stand-in for Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return fake Windows locale names."""
+            return ["Spanish_Spain"]
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    assert language_from_windows_locale(translations, FakeWindowsApi) == "es"
+    assert choose_language(
+        translations,
+        environ={},
+        locale_module=NoLocaleModule,
+        windows_api=FakeWindowsApi,
+    ) == "es"
+
+
+def test_windows_display_language_overrides_python_locale():
+    """Test if Windows UI language wins over Python's locale fallback."""
+    translations = load_translations()
+
+    class EnglishLocaleModule:
+        """Small stand-in for Python reporting an English locale."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "en_GB", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "en_GB", "UTF-8"
+
+    class FakeWindowsApi:
+        """Small stand-in for Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return a fake Windows Spanish UI locale."""
+            return ["es-ES"]
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    assert choose_language(
+        translations,
+        environ={},
+        locale_module=EnglishLocaleModule,
+        windows_api=FakeWindowsApi,
+    ) == "es"
+
+
+def test_windows_language_id_overrides_english_locale_name():
+    """Test if active Windows language ID can choose Spanish."""
+    translations = load_translations()
+
+    class FakeWindowsApi:
+        """Small stand-in for Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return fake English Windows locale names."""
+            return ["en-GB", "en-US"]
+
+        @staticmethod
+        def get_language_ids():
+            """Return a fake Spanish language ID."""
+            return [0x0C0A]
+
+    assert language_from_windows_locale(translations, FakeWindowsApi) == "es"
+
+
+def test_logsim_detects_windows_language_before_wx_starts():
+    """Test if logsim preserves Windows UI language before wx.App exists."""
+
+    class NoLocaleModule:
+        """Small stand-in for an unset Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return no active locale."""
+            return None, None
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return no default locale."""
+            return None, None
+
+    class FakeWindowsApi:
+        """Small stand-in for Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return a fake Spanish UI language ID."""
+            return [0x0A]
+
+    assert detect_startup_language(
+        {}, NoLocaleModule, FakeWindowsApi
+    ) == "es"
+
+
 def test_wx_language_id_uses_selected_language_constant():
     """Test if wx.Locale is initialised with the selected language."""
     fake_wx = SimpleNamespace(
@@ -164,10 +297,27 @@ def test_choose_language_uses_wx_account_locale_when_env_unset():
             """Return fake desktop language information."""
             return SimpleNamespace(CanonicalName="fr_FR")
 
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
     fake_wx = SimpleNamespace(Locale=FakeLocale)
 
     assert choose_language(
-        translations, fake_wx, environ={}, locale_module=NoLocaleModule
+        translations,
+        fake_wx,
+        environ={},
+        locale_module=NoLocaleModule,
+        windows_api=NoWindowsApi,
     ) == "fr"
 
 

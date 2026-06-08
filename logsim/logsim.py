@@ -24,16 +24,19 @@ from userint import UserInterface
 from language import (
     language_from_environment,
     language_from_python_locale,
+    language_from_windows_locale,
     load_translations,
 )
 
 
-def detect_startup_language(environ=None, locale_module=None):
+def detect_startup_language(environ=None, locale_module=None,
+                            windows_api=None):
     """Return an explicit process or account language, if one is set."""
     translations = load_translations()
     supported_languages = set(translations)
     return (
         language_from_environment(environ, supported_languages)
+        or language_from_windows_locale(supported_languages, windows_api)
         or language_from_python_locale(supported_languages, locale_module)
     )
 

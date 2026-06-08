@@ -8,6 +8,21 @@ from pathlib import Path
 
 DEFAULT_LANGUAGE = "en"
 CATALOGUE_PATH = Path(__file__).with_name("locales") / "gui_text.json"
+LANGUAGE_ALIASES = {
+    "arabic": "ar",
+    "deutsch": "de",
+    "english": "en",
+    "french": "fr",
+    "german": "de",
+    "spanish": "es",
+}
+WINDOWS_PRIMARY_LANGUAGE_IDS = {
+    0x01: "ar",
+    0x07: "de",
+    0x09: "en",
+    0x0A: "es",
+    0x0C: "fr",
+}
 
 
 def load_catalogue(path=CATALOGUE_PATH):
@@ -55,7 +70,8 @@ def normalise_language_code(locale_name):
     locale_name = locale_name.split(".", 1)[0]
     locale_name = locale_name.split("@", 1)[0]
     locale_name = locale_name.replace("-", "_")
-    return locale_name.split("_", 1)[0].lower()
+    code = locale_name.split("_", 1)[0].lower()
+    return LANGUAGE_ALIASES.get(code, code)
 
 
 def language_from_environment(environ=None, supported_languages=None):
@@ -128,6 +144,106 @@ def language_from_python_locale(supported_languages=None, locale_module=None):
     return None
 
 
+def windows_locale_names_and_ids(windows_api=None):
+    """Return Windows locale names and language IDs, when available."""
+    if windows_api is not None:
+        return (
+            list(windows_api.get_locale_names()),
+            list(windows_api.get_language_ids()),
+        )
+
+    try:
+        import ctypes
+    except ImportError:
+        return [], []
+
+    kernel32 = getattr(getattr(ctypes, "windll", None), "kernel32", None)
+    if kernel32 is None:
+        return [], []
+    user32 = getattr(getattr(ctypes, "windll", None), "user32", None)
+
+    locale_names = []
+    language_ids = []
+
+    try:
+        mui_language_name = 0x8
+        language_count = ctypes.c_ulong()
+        buffer_length = ctypes.c_ulong()
+        kernel32.GetUserPreferredUILanguages(
+            mui_language_name,
+            ctypes.byref(language_count),
+            None,
+            ctypes.byref(buffer_length),
+        )
+        if buffer_length.value:
+            buffer = ctypes.create_unicode_buffer(buffer_length.value)
+            if kernel32.GetUserPreferredUILanguages(
+                mui_language_name,
+                ctypes.byref(language_count),
+                buffer,
+                ctypes.byref(buffer_length),
+            ):
+                locale_names.extend(
+                    name for name in "".join(buffer).split("\x00") if name
+                )
+    except (AttributeError, OSError, TypeError):
+        pass
+
+    try:
+        buffer = ctypes.create_unicode_buffer(85)
+        if kernel32.GetUserDefaultLocaleName(buffer, len(buffer)):
+            locale_names.append(buffer.value)
+    except (AttributeError, OSError, TypeError):
+        pass
+
+    try:
+        buffer = ctypes.create_unicode_buffer(85)
+        if kernel32.GetSystemDefaultLocaleName(buffer, len(buffer)):
+            locale_names.append(buffer.value)
+    except (AttributeError, OSError, TypeError):
+        pass
+
+    if user32 is not None:
+        try:
+            language_ids.append(user32.GetKeyboardLayout(0) & 0xFFFF)
+        except (AttributeError, OSError, TypeError):
+            pass
+
+    for function_name in [
+        "GetUserDefaultUILanguage",
+        "GetUserDefaultLangID",
+        "GetSystemDefaultUILanguage",
+    ]:
+        try:
+            language_ids.append(getattr(kernel32, function_name)())
+        except (AttributeError, OSError, TypeError):
+            pass
+
+    return locale_names, language_ids
+
+
+def language_from_windows_locale(supported_languages=None, windows_api=None):
+    """Return the Windows account or display language, when available."""
+    supported_languages = set(supported_languages or [])
+    locale_names, language_ids = windows_locale_names_and_ids(windows_api)
+
+    for language_id in language_ids:
+        try:
+            primary_language_id = int(language_id) & 0x3FF
+        except (TypeError, ValueError):
+            continue
+        code = WINDOWS_PRIMARY_LANGUAGE_IDS.get(primary_language_id)
+        if code and (not supported_languages or code in supported_languages):
+            return code
+
+    for locale_name in locale_names:
+        code = normalise_language_code(locale_name)
+        if code and (not supported_languages or code in supported_languages):
+            return code
+
+    return None
+
+
 def wx_language_id(wx_module, language_code):
     """Return the wx language constant for a catalogue language code."""
     constant_names = {
@@ -158,10 +274,16 @@ def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
 
 
 def choose_language(translations, wx_module=None, environ=None,
-                    locale_module=None):
+                    locale_module=None, windows_api=None):
     """Choose the best available language for the GUI."""
     supported_languages = set(translations)
     language_code = language_from_environment(environ, supported_languages)
+    if language_code:
+        return language_code
+
+    language_code = language_from_windows_locale(
+        supported_languages, windows_api
+    )
     if language_code:
         return language_code
 
