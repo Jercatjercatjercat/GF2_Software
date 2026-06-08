@@ -277,10 +277,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def calculate_display_bounds(self, size):
         """Return circuit and oscilloscope bounds with hard minima."""
-        available_width = max(
-            self.min_view_width,
-            size.width - self.canvas_horizontal_padding,
-        )
+        available_width = max(1, size.width - self.canvas_horizontal_padding)
         desired_circuit_height = max(
             self.estimate_circuit_height(), self.min_circuit_height
         )

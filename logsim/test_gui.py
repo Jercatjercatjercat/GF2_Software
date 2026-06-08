@@ -379,8 +379,9 @@ def test_display_bounds_enforce_circuit_and_scope_minimum_regions():
     canvas.scope_y = 20
     canvas.scope_gap = 8
 
+    min_width, min_height = canvas.minimum_visual_size()
     circuit_bounds, scope_bounds = canvas.calculate_display_bounds(
-        SimpleNamespace(width=600, height=420)
+        SimpleNamespace(width=min_width, height=min_height)
     )
 
     assert circuit_bounds[2] >= canvas.min_view_width
@@ -388,3 +389,24 @@ def test_display_bounds_enforce_circuit_and_scope_minimum_regions():
     assert scope_bounds[2] >= canvas.min_view_width
     assert scope_bounds[3] >= canvas.min_scope_height
     assert circuit_bounds[1] >= scope_bounds[1] + scope_bounds[3]
+
+
+def test_display_bounds_never_exceed_actual_canvas_width():
+    """Test if drawing bounds stay inside the visible canvas width."""
+    devices = FakeDevices([fake_device("A"), fake_device("OUT")])
+    canvas = make_canvas(devices)
+    canvas.min_circuit_height = 220
+    canvas.min_scope_height = 280
+    canvas.min_view_width = 760
+    canvas.canvas_horizontal_padding = 36
+    canvas.canvas_top_margin = 18
+    canvas.scope_y = 20
+    canvas.scope_gap = 8
+
+    narrow_width = 600
+    circuit_bounds, scope_bounds = canvas.calculate_display_bounds(
+        SimpleNamespace(width=narrow_width, height=760)
+    )
+
+    assert circuit_bounds[0] + circuit_bounds[2] <= narrow_width
+    assert scope_bounds[0] + scope_bounds[2] <= narrow_width
