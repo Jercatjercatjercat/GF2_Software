@@ -53,9 +53,13 @@ class Monitors:
         self.network = network
         self.devices = devices
 
-        # monitors_dictionary stores
+        # monitors_dictionary stores visible traces:
         # {(device_id, output_id): [signal_list]}
         self.monitors_dictionary = collections.OrderedDict()
+
+        # Removed monitors are hidden from the GUI list, but their traces are
+        # still recorded so re-adding a signal preserves the full timeline.
+        self.inactive_monitors_dictionary = collections.OrderedDict()
 
         [self.NO_ERROR, self.NOT_OUTPUT,
          self.MONITOR_PRESENT] = self.names.unique_error_codes(3)
@@ -73,12 +77,17 @@ class Monitors:
         elif (device_id, output_id) in self.monitors_dictionary:
             return self.MONITOR_PRESENT
         else:
-            # If n simulation cycles have been completed before making this
-            # monitor, then initialise the signal trace with an n-length list
-            # of BLANK signals. Otherwise, initialise the trace with an empty
-            # list.
-            self.monitors_dictionary[(device_id, output_id)] = [
-                self.devices.BLANK] * cycles_completed
+            key = (device_id, output_id)
+            if key in self.inactive_monitors_dictionary:
+                self.monitors_dictionary[key] = (
+                    self.inactive_monitors_dictionary.pop(key)
+                )
+            else:
+                # If n simulation cycles have been completed before making
+                # this monitor, initialise with BLANK signals so the trace
+                # stays aligned with existing monitors.
+                self.monitors_dictionary[key] = [
+                    self.devices.BLANK] * cycles_completed
             return self.NO_ERROR
 
     def remove_monitor(self, device_id, output_id):
@@ -86,10 +95,14 @@ class Monitors:
 
         Return True if successful.
         """
-        if (device_id, output_id) not in self.monitors_dictionary:
+        key = (device_id, output_id)
+        if key not in self.monitors_dictionary:
             return False
         else:
-            del self.monitors_dictionary[(device_id, output_id)]
+            self.inactive_monitors_dictionary[key] = (
+                self.monitors_dictionary[key]
+            )
+            del self.monitors_dictionary[key]
             return True
 
     def get_monitor_signal(self, device_id, output_id):
@@ -107,10 +120,13 @@ class Monitors:
 
         This function is called at every simulation cycle.
         """
-        for device_id, output_id in self.monitors_dictionary:
-            signal_level = self.get_monitor_signal(device_id, output_id)
-            self.monitors_dictionary[(device_id,
-                                      output_id)].append(signal_level)
+        for trace_dictionary in [
+                self.monitors_dictionary, self.inactive_monitors_dictionary]:
+            for device_id, output_id in trace_dictionary:
+                signal_level = self.network.get_output_signal(
+                    device_id, output_id
+                )
+                trace_dictionary[(device_id, output_id)].append(signal_level)
 
     def get_signal_names(self):
         """Return two signal name lists: monitored and not monitored."""
@@ -135,8 +151,10 @@ class Monitors:
 
         The list of stored signal levels for each monitor is deleted.
         """
-        for device_id, output_id in self.monitors_dictionary:
-            self.monitors_dictionary[(device_id, output_id)] = []
+        for trace_dictionary in [
+                self.monitors_dictionary, self.inactive_monitors_dictionary]:
+            for device_id, output_id in trace_dictionary:
+                trace_dictionary[(device_id, output_id)] = []
 
     def get_margin(self):
         """Return the length of the longest monitor's name.

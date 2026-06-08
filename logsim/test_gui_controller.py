@@ -129,6 +129,27 @@ def test_remove_monitor_removes_selected_signal(controller):
     )
 
 
+def test_readded_monitor_preserves_hidden_trace(controller):
+    """Test if a removed monitor keeps recording while hidden."""
+    g1_id = controller.names.query("G1")
+
+    controller.run_from_start(2)
+    success, message = controller.remove_monitor("G1")
+    assert success
+    assert message == "Removed monitor G1."
+
+    controller.set_switch("SW1", 1)
+    controller.continue_simulation(2)
+    success, message = controller.add_monitor("G1")
+
+    assert success
+    assert message == "Added monitor G1."
+    assert controller.monitors.monitors_dictionary[(g1_id, None)] == [
+        controller.devices.LOW, controller.devices.LOW,
+        controller.devices.HIGH, controller.devices.HIGH
+    ]
+
+
 def test_monitor_lists_split_current_and_available(controller):
     """Test if monitored and unmonitored output lists are correct."""
     assert controller.list_monitored_signals() == ["G1"]
