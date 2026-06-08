@@ -15,6 +15,7 @@ def test_normalise_language_code_reads_locale_prefix():
     """Test if locale names reduce to supported language codes."""
     assert normalise_language_code("es_ES.utf8") == "es"
     assert normalise_language_code("de-DE") == "de"
+    assert normalise_language_code("ar-EG") == "ar"
     assert normalise_language_code("C") is None
 
 
@@ -25,6 +26,15 @@ def test_language_from_environment_uses_lang_for_logsim_only():
 
     assert language_from_environment(environ, translations) == "es"
     assert choose_language(translations, environ=environ) == "es"
+
+
+def test_language_from_environment_accepts_arabic_locale():
+    """Test if LANG can select Arabic for the current process."""
+    translations = load_translations()
+    environ = {"LANG": "ar_SA.utf8"}
+
+    assert language_from_environment(environ, translations) == "ar"
+    assert choose_language(translations, environ=environ) == "ar"
 
 
 def test_choose_language_uses_wx_account_locale_when_env_unset():
@@ -65,3 +75,11 @@ def test_catalogue_contains_non_latin_sample():
     assert "\u03a9" in about_text
     assert "\u0416" in about_text
     assert "\u4e2d" in about_text
+
+
+def test_catalogue_contains_arabic_language():
+    """Test if the catalogue contains Arabic GUI labels."""
+    translations = load_translations()
+
+    assert translations["ar"]["window_title"] == "محاكي المنطق"
+    assert translations["ar"]["language"] == "اللغة"
