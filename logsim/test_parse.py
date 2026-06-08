@@ -192,6 +192,53 @@ def test_parse_valid_rc_power_up_pulse(tmp_path):
     assert q_trace[0] == devices.HIGH
 
 
+def test_parse_valid_siggen_dtype_clock(tmp_path):
+    """Test if parser builds a SIGGEN waveform that clocks a DTYPE."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            PATTERN_CLK : SIGGEN(0, 1, 1, 0);
+            DATA_SW : SWITCH(1);
+            SET_SW : SWITCH(0);
+            CLEAR_SW : SWITCH(0);
+            D1 : DTYPE;
+        }
+        CONNECT {
+            PATTERN_CLK -> D1.CLK;
+            DATA_SW -> D1.DATA;
+            SET_SW -> D1.SET;
+            CLEAR_SW -> D1.CLEAR;
+        }
+        MONITOR { PATTERN_CLK, D1.Q };
+        END;
+        """,
+    )
+
+    assert parser.parse_network()
+    [siggen_id, d1_id, clk_id, q_id] = names.lookup(
+        ["PATTERN_CLK", "D1", "CLK", "Q"]
+    )
+
+    siggen = devices.get_device(siggen_id)
+    assert siggen.device_kind == devices.SIGGEN
+    assert siggen.siggen_pattern == [
+        devices.LOW, devices.HIGH, devices.HIGH, devices.LOW
+    ]
+    assert network.get_connected_output(d1_id, clk_id) == (siggen_id, None)
+
+    siggen_trace = []
+    q_trace = []
+    for _ in range(4):
+        assert network.execute_network()
+        siggen_trace.append(network.get_output_signal(siggen_id, None))
+        q_trace.append(network.get_output_signal(d1_id, q_id))
+
+    assert siggen_trace == [
+        devices.LOW, devices.HIGH, devices.HIGH, devices.LOW
+    ]
+    assert q_trace[1] == devices.HIGH
+
+
 def test_parse_rejects_empty_devices_section(tmp_path):
     """Test if parser rejects a DEVICES section with no devices."""
     parser, names, devices, network, monitors = make_parser(

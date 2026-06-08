@@ -135,7 +135,7 @@ class Parser:
         )
         self._handle_device_error(error, device_id)
 
-    def _parse_device_spec(self) -> tuple[int | None, int | None]:
+    def _parse_device_spec(self) -> tuple[int | None, object]:
         """Parse a device specification and return kind and property."""
         if self._is_keyword(self.scanner.SWITCH_ID):
             self._advance()
@@ -164,6 +164,15 @@ class Parser:
                                 "expected ')' after RC delay")
             return self.devices.RC, delay
 
+        if self._is_keyword(self.scanner.SIGGEN_ID):
+            self._advance()
+            self._expect_symbol(self.scanner.LEFT_PAREN,
+                                "expected '(' after SIGGEN")
+            pattern = self._parse_siggen_pattern()
+            self._expect_symbol(self.scanner.RIGHT_PAREN,
+                                "expected ')' after SIGGEN waveform")
+            return self.devices.SIGGEN, pattern
+
         if self._is_gate_kind():
             device_kind = self.symbol.id
             self._advance()
@@ -184,6 +193,21 @@ class Parser:
 
         self._report_syntax_error("expected device type")
         return None, None
+
+    def _parse_siggen_pattern(self) -> list[int]:
+        """Parse a SIGGEN waveform as a comma-separated list of bits."""
+        pattern = []
+        bit = self._parse_bit()
+        if bit is not None:
+            pattern.append(bit)
+
+        while self.symbol.type == self.scanner.COMMA:
+            self._advance()
+            bit = self._parse_bit()
+            if bit is not None:
+                pattern.append(bit)
+
+        return pattern
 
     def _parse_bit(self) -> int | None:
         """Parse a bit value, either 0 or 1."""

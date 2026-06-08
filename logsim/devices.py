@@ -41,6 +41,8 @@ class Device:
         self.clock_counter = None
         self.rc_delay = None
         self.rc_counter = None
+        self.siggen_pattern = None
+        self.siggen_index = None
         self.switch_state = None
         self.dtype_memory = None
 
@@ -93,6 +95,8 @@ class Devices:
 
     make_rc(self, device_id, rc_delay): Makes an RC device.
 
+    make_siggen(self, device_id, pattern): Makes a signal generator device.
+
     make_d_type(self, device_id): Makes a D-type device.
 
     cold_startup(self): Simulates cold start-up of D-types and clocks.
@@ -109,7 +113,7 @@ class Devices:
         self.devices_list = []
 
         gate_strings = ["AND", "OR", "NAND", "NOR", "XOR"]
-        device_strings = ["CLOCK", "SWITCH", "RC", "DTYPE"]
+        device_strings = ["CLOCK", "SWITCH", "RC", "SIGGEN", "DTYPE"]
         dtype_inputs = ["CLK", "SET", "CLEAR", "DATA"]
         dtype_outputs = ["Q", "QBAR"]
 
@@ -121,7 +125,7 @@ class Devices:
                              self.FALLING, self.BLANK] = range(5)
         self.gate_types = [self.AND, self.OR, self.NAND, self.NOR,
                            self.XOR] = self.names.lookup(gate_strings)
-        self.device_types = [self.CLOCK, self.SWITCH, self.RC,
+        self.device_types = [self.CLOCK, self.SWITCH, self.RC, self.SIGGEN,
                              self.D_TYPE] = self.names.lookup(device_strings)
         self.dtype_input_ids = [self.CLK_ID, self.SET_ID, self.CLEAR_ID,
                                 self.DATA_ID] = self.names.lookup(dtype_inputs)
@@ -256,6 +260,18 @@ class Devices:
         device.rc_delay = rc_delay
         self.cold_startup()
 
+    def make_siggen(self, device_id, pattern):
+        """Make a signal generator with an arbitrary periodic waveform.
+
+        pattern is a non-empty list of LOW/HIGH values. The first value is the
+        cold start-up output, and later values are emitted one per simulation
+        cycle before repeating.
+        """
+        self.add_device(device_id, self.SIGGEN)
+        device = self.get_device(device_id)
+        device.siggen_pattern = list(pattern)
+        self.cold_startup()
+
     def make_gate(self, device_id, device_kind, no_of_inputs):
         """Make logic gates with the specified number of inputs."""
         self.add_device(device_id, device_kind)
@@ -281,7 +297,8 @@ class Devices:
         Set the memory of the D-types to a random state. Clocks start
         deterministically low at the beginning of their cycle, so repeated
         runs of the same network produce the same clock trace. RC devices
-        start HIGH at the beginning of their delay.
+        start HIGH at the beginning of their delay. Signal generators start at
+        the first value in their waveform.
         """
         for device in self.devices_list:
             if device.device_kind == self.D_TYPE:
@@ -296,6 +313,11 @@ class Devices:
                 self.add_output(device.device_id, output_id=None,
                                 signal=self.HIGH)
                 device.rc_counter = 0
+
+            elif device.device_kind == self.SIGGEN:
+                self.add_output(device.device_id, output_id=None,
+                                signal=device.siggen_pattern[0])
+                device.siggen_index = 0
 
     def make_device(self, device_id, device_kind, device_property=None):
         """Create the specified device.
@@ -334,6 +356,19 @@ class Devices:
                 error_type = self.INVALID_QUALIFIER
             else:
                 self.make_rc(device_id, device_property)
+                error_type = self.NO_ERROR
+
+        elif device_kind == self.SIGGEN:
+            # Device property is the arbitrary periodic output waveform.
+            if device_property is None:
+                error_type = self.NO_QUALIFIER
+            elif (not isinstance(device_property, list) or
+                  device_property == [] or
+                  any(bit not in [self.LOW, self.HIGH]
+                      for bit in device_property)):
+                error_type = self.INVALID_QUALIFIER
+            else:
+                self.make_siggen(device_id, device_property)
                 error_type = self.NO_ERROR
 
         elif device_kind in self.gate_types:

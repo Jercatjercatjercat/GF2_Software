@@ -4,6 +4,8 @@ These files use the current revised grammar:
 
 - `SWITCH(0)` or `SWITCH(1)`
 - `CLOCK(4)`
+- `RC(3)`
+- `SIGGEN(0, 1, 1, 0)`
 - `AND(2)`, `NAND(2)`, `OR(2)`, `NOR(2)`
 - `XOR`
 - `DTYPE`

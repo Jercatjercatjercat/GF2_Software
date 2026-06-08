@@ -389,6 +389,62 @@ def test_rc_starts_high_and_falls_after_delay(new_network):
     ]
 
 
+def test_siggen_repeats_arbitrary_waveform(new_network):
+    """Test if SIGGEN outputs one periodic waveform value per cycle."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [siggen_id] = names.lookup(["Pattern"])
+    devices.make_device(
+        siggen_id, devices.SIGGEN,
+        [devices.LOW, devices.HIGH, devices.HIGH, devices.LOW]
+    )
+
+    siggen = devices.get_device(siggen_id)
+    assert siggen.outputs[None] == devices.LOW
+    assert siggen.siggen_index == 0
+
+    trace = []
+    for _ in range(8):
+        assert network.execute_network()
+        trace.append(network.get_output_signal(siggen_id, None))
+
+    assert trace == [
+        devices.LOW, devices.HIGH, devices.HIGH, devices.LOW,
+        devices.LOW, devices.HIGH, devices.HIGH, devices.LOW,
+    ]
+
+
+def test_siggen_rising_edge_can_clock_dtype(new_network):
+    """Test if a SIGGEN LOW-to-HIGH transition clocks a DTYPE."""
+    network = new_network
+    devices = network.devices
+    names = devices.names
+
+    [siggen_id, data_id, set_id, clear_id, dtype_id] = names.lookup(
+        ["Pattern", "Data", "Set", "Clear", "D1"]
+    )
+
+    devices.make_device(siggen_id, devices.SIGGEN, [devices.LOW, devices.HIGH])
+    devices.make_device(data_id, devices.SWITCH, devices.HIGH)
+    devices.make_device(set_id, devices.SWITCH, devices.LOW)
+    devices.make_device(clear_id, devices.SWITCH, devices.LOW)
+    devices.make_device(dtype_id, devices.D_TYPE)
+
+    network.make_connection(data_id, None, dtype_id, devices.DATA_ID)
+    network.make_connection(set_id, None, dtype_id, devices.SET_ID)
+    network.make_connection(clear_id, None, dtype_id, devices.CLEAR_ID)
+    network.make_connection(siggen_id, None, dtype_id, devices.CLK_ID)
+
+    assert network.execute_network()
+    assert network.get_output_signal(siggen_id, None) == devices.LOW
+
+    assert network.execute_network()
+    assert network.get_output_signal(siggen_id, None) == devices.HIGH
+    assert network.get_output_signal(dtype_id, devices.Q_ID) == devices.HIGH
+
+
 def test_oscillating_network(new_network):
     """Test if the execute_network returns False for oscillating networks."""
     network = new_network
