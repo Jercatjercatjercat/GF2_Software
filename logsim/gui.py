@@ -52,6 +52,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.zoom = 1.0
         self.circuit_scroll_x = 0
         self.circuit_scroll_y = 0
+        self.circuit_zoom = 1.0
+        self.scope_cycle_zoom = 1.0
         self.circuit_drag_mode = None
         self.circuit_drag_offset = 0
         self.circuit_geometry = {}
@@ -67,6 +69,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_scope_bounds = None
 
         self.left_margin = 150
+        self.canvas_horizontal_padding = 36
+        self.canvas_top_margin = 18
+        self.scope_y = 20
+        self.scope_gap = 8
+        self.min_circuit_height = 220
+        self.min_scope_height = 280
+        self.min_view_width = 760
         self.default_cycle_width = 28
         self.cycle_width = self.default_cycle_width
         self.row_height = 34
@@ -101,12 +110,54 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.zoom = 1.0
         self.circuit_scroll_x = 0
         self.circuit_scroll_y = 0
+        self.circuit_zoom = 1.0
+        self.scope_cycle_zoom = 1.0
         self.circuit_drag_mode = None
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.scope_drag_mode = None
         self.follow_latest_cycles = False
         self.init = False
+        self.Refresh()
+
+    def minimum_visual_size(self):
+        """Return the minimum canvas size that keeps both views readable."""
+        min_width = self.min_view_width + self.canvas_horizontal_padding
+        min_height = (
+            self.scope_y + self.min_scope_height + self.scope_gap
+            + self.min_circuit_height + self.canvas_top_margin
+        )
+        return min_width, min_height
+
+    def zoom_circuit(self, factor):
+        """Zoom the circuit overview around its current scroll position."""
+        old_zoom = self.circuit_zoom
+        self.circuit_zoom = self.clamp(self.circuit_zoom * factor, 0.35, 3.0)
+        if self.circuit_zoom != old_zoom:
+            self.circuit_scroll_x *= self.circuit_zoom / old_zoom
+            self.circuit_scroll_y *= self.circuit_zoom / old_zoom
+        self.Refresh()
+
+    def fit_circuit(self):
+        """Zoom out enough to inspect a large circuit overview."""
+        self.circuit_zoom = 0.45
+        self.circuit_scroll_x = 0
+        self.circuit_scroll_y = 0
+        self.Refresh()
+
+    def zoom_scope(self, factor):
+        """Zoom the oscilloscope time axis in or out."""
+        self.scope_cycle_zoom = self.clamp(
+            self.scope_cycle_zoom * factor, 0.25, 4.0
+        )
+        self.follow_latest_cycles = False
+        self.Refresh()
+
+    def fit_scope(self):
+        """Zoom out to show as much oscilloscope history as possible."""
+        self.scope_cycle_zoom = 0.25
+        self.scope_first_cycle = 0
+        self.follow_latest_cycles = False
         self.Refresh()
 
     def set_dark_mode(self, enabled):
@@ -216,44 +267,42 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        top_margin = 18
-        scope_y = 20
-        scope_gap = 8
-        min_scope_height = 240
-        desired_circuit_height = self.estimate_circuit_height()
-        max_circuit_height = max(
-            160,
-            size.height - top_margin - scope_y - scope_gap
-            - min_scope_height
-        )
-        circuit_height = min(desired_circuit_height, max_circuit_height)
-        circuit_height = max(160, circuit_height)
-        circuit_bounds = (
-            18, size.height - circuit_height - top_margin,
-            size.width - 36, circuit_height
-        )
-        scope_bounds = (
-            18, scope_y, size.width - 36,
-            circuit_bounds[1] - scope_y - scope_gap
-        )
-
-        if scope_bounds[3] < min_scope_height:
-            scope_bounds = (
-                18, scope_y, size.width - 36, min_scope_height
-            )
-            circuit_y = scope_y + min_scope_height + scope_gap
-            circuit_height = max(
-                120, size.height - circuit_y - top_margin
-            )
-            circuit_bounds = (
-                18, circuit_y, size.width - 36, circuit_height
-            )
+        circuit_bounds, scope_bounds = self.calculate_display_bounds(size)
 
         self.last_circuit_bounds = circuit_bounds
         self.draw_canvas_grid(size)
         self.draw_circuit_overview(circuit_bounds)
         self.draw_oscilloscope(scope_bounds, monitor_items)
         self.finish_render(swap)
+
+    def calculate_display_bounds(self, size):
+        """Return circuit and oscilloscope bounds with hard minima."""
+        available_width = max(
+            self.min_view_width,
+            size.width - self.canvas_horizontal_padding,
+        )
+        desired_circuit_height = max(
+            self.estimate_circuit_height(), self.min_circuit_height
+        )
+        available_for_circuit = (
+            size.height - self.canvas_top_margin - self.scope_y
+            - self.scope_gap - self.min_scope_height
+        )
+        circuit_height = max(
+            self.min_circuit_height,
+            min(desired_circuit_height, available_for_circuit),
+        )
+        circuit_y = self.scope_y + self.min_scope_height + self.scope_gap
+        if size.height >= (
+            self.scope_y + self.min_scope_height + self.scope_gap
+            + circuit_height + self.canvas_top_margin
+        ):
+            circuit_y = size.height - circuit_height - self.canvas_top_margin
+
+        circuit_bounds = (18, circuit_y, available_width, circuit_height)
+        scope_bounds = (18, self.scope_y, available_width,
+                        self.min_scope_height)
+        return circuit_bounds, scope_bounds
 
     def finish_render(self, swap=True):
         """Flush drawing commands and optionally swap buffers."""
@@ -423,9 +472,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if view_width <= 0 or view_height <= 0:
             return
 
-        content_width, content_height = self.circuit_content_size(
+        base_content_width, base_content_height = self.circuit_content_size(
             view_width, view_height
         )
+        circuit_zoom = getattr(self, "circuit_zoom", 1.0)
+        content_width = base_content_width * circuit_zoom
+        content_height = base_content_height * circuit_zoom
         max_scroll_x = max(content_width - view_width, 0)
         max_scroll_y = max(content_height - view_height, 0)
         self.circuit_scroll_x = self.clamp(
@@ -434,11 +486,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_scroll_y = self.clamp(
             self.circuit_scroll_y, 0, max_scroll_y
         )
-        content_bounds = (
-            view_x - self.circuit_scroll_x,
-            view_y + view_height - content_height + self.circuit_scroll_y,
-            content_width,
-            content_height,
+        content_origin_x = view_x - self.circuit_scroll_x
+        content_origin_y = (
+            view_y + view_height - content_height + self.circuit_scroll_y
         )
         self.circuit_geometry = {
             "view": view_bounds,
@@ -449,12 +499,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         }
 
         self.begin_scissor(view_bounds)
-        positions = self.build_device_positions(content_bounds)
+        GL.glPushMatrix()
+        GL.glTranslated(content_origin_x, content_origin_y, 0.0)
+        GL.glScaled(circuit_zoom, circuit_zoom, 1.0)
+        positions = self.build_device_positions(
+            (0, 0, base_content_width, base_content_height)
+        )
         self.draw_connections(positions)
 
         for device in self.devices.devices_list:
             if device.device_id in positions:
                 self.draw_device_node(device, positions[device.device_id])
+        GL.glPopMatrix()
         self.end_scissor()
         self.draw_circuit_scrollbars(view_bounds)
 
@@ -816,9 +872,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
 
-        max_visible_cycles = max(
-            10, int(plot_width // self.default_cycle_width)
-        )
+        scope_cycle_zoom = getattr(self, "scope_cycle_zoom", 1.0)
+        zoomed_cycle_width = self.default_cycle_width * scope_cycle_zoom
+        max_visible_cycles = max(10, int(plot_width // zoomed_cycle_width))
         max_cycles = self.max_recorded_cycles(monitor_items)
         if max_cycles == 0:
             cycle_count = min(10, max_visible_cycles)
@@ -1608,7 +1664,7 @@ class Gui(wx.Frame):
 
     def __init__(self, title, path, names, devices, network, monitors):
         """Initialise widgets, controller, and layout."""
-        super().__init__(parent=None, title=title, size=(1000, 700))
+        super().__init__(parent=None, title=title, size=(1120, 760))
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
@@ -1632,7 +1688,8 @@ class Gui(wx.Frame):
         self.refresh_choices()
         self.set_status("Loaded " + path)
 
-        self.SetSizeHints(760, 520)
+        min_canvas_width, min_canvas_height = self.canvas.minimum_visual_size()
+        self.SetSizeHints(min_canvas_width + 420, min_canvas_height + 170)
 
     def build_translations(self):
         """Return UI label translations keyed by language code."""
@@ -1665,6 +1722,7 @@ class Gui(wx.Frame):
                 "help": "Help",
                 "switches": "Switches",
                 "monitors": "Monitors",
+                "view": "View",
                 "readings": "Readings",
                 "log": "Log",
                 "switch": "Switch",
@@ -1675,6 +1733,9 @@ class Gui(wx.Frame):
                 "current_monitors": "Current monitors",
                 "remove_monitor": "Remove Monitor",
                 "reset_view": "Reset View",
+                "circuit_zoom": "Circuit zoom",
+                "scope_zoom": "Scope zoom",
+                "fit": "Fit",
                 "status_prefix": "Status",
                 "language_changed": "Language changed.",
                 "dark_mode_enabled": "Dark mode enabled.",
@@ -1740,6 +1801,9 @@ class Gui(wx.Frame):
                 "current_monitors": "Moniteurs actuels",
                 "remove_monitor": "Retirer moniteur",
                 "reset_view": "Reinitialiser vue",
+                "circuit_zoom": "Zoom circuit",
+                "scope_zoom": "Zoom scope",
+                "fit": "Ajuster",
                 "status_prefix": "Statut",
                 "language_changed": "Langue modifiee.",
                 "dark_mode_enabled": "Mode sombre active.",
@@ -1792,6 +1856,7 @@ class Gui(wx.Frame):
                 "help": "Ayuda",
                 "switches": "Interruptores",
                 "monitors": "Monitores",
+                "view": "Vista",
                 "readings": "Lecturas",
                 "log": "Registro",
                 "switch": "Interruptor",
@@ -1802,6 +1867,9 @@ class Gui(wx.Frame):
                 "current_monitors": "Monitores actuales",
                 "remove_monitor": "Quitar monitor",
                 "reset_view": "Reiniciar vista",
+                "circuit_zoom": "Zoom circuito",
+                "scope_zoom": "Zoom scope",
+                "fit": "Ajustar",
                 "status_prefix": "Estado",
                 "language_changed": "Idioma cambiado.",
                 "dark_mode_enabled": "Modo oscuro activado.",
@@ -1854,6 +1922,7 @@ class Gui(wx.Frame):
                 "help": "Hilfe",
                 "switches": "Schalter",
                 "monitors": "Monitore",
+                "view": "Ansicht",
                 "readings": "Werte",
                 "log": "Log",
                 "switch": "Schalter",
@@ -1864,6 +1933,9 @@ class Gui(wx.Frame):
                 "current_monitors": "Aktuelle Monitore",
                 "remove_monitor": "Monitor entfernen",
                 "reset_view": "Ansicht reset",
+                "circuit_zoom": "Schaltung zoom",
+                "scope_zoom": "Scope zoom",
+                "fit": "Einpassen",
                 "status_prefix": "Status",
                 "language_changed": "Sprache geandert.",
                 "dark_mode_enabled": "Dunkelmodus aktiviert.",
@@ -1937,8 +2009,9 @@ class Gui(wx.Frame):
         text_controls = [
             self.cycles_label, self.speed_label, self.switch_label,
             self.add_monitor_label, self.remove_monitor_label,
-            self.switch_box, self.monitor_box, self.readings_box,
-            self.log_box,
+            self.circuit_zoom_label, self.scope_zoom_label,
+            self.switch_box, self.monitor_box, self.view_box,
+            self.readings_box, self.log_box,
         ]
         buttons = [
             self.run_button, self.continue_button, self.step_button,
@@ -1947,7 +2020,10 @@ class Gui(wx.Frame):
             self.language_button, self.dark_mode_button,
             self.colour_blind_button, self.help_button, self.set_switch_button,
             self.add_monitor_button, self.remove_monitor_button,
-            self.reset_view_button,
+            self.reset_view_button, self.circuit_zoom_in_button,
+            self.circuit_zoom_out_button, self.circuit_fit_button,
+            self.scope_zoom_in_button, self.scope_zoom_out_button,
+            self.scope_fit_button,
         ]
         fields = [
             self.cycles_spin, self.speed_slider, self.switch_choice,
@@ -2063,6 +2139,9 @@ class Gui(wx.Frame):
             )
         )
         self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
+        self.canvas.SetMinSize(self.canvas.minimum_visual_size())
+        self.readings_list.SetMinSize((230, 100))
+        self.log_text.SetMinSize((230, 84))
 
         self.switch_label = wx.StaticText(self, wx.ID_ANY, self.t("switch"))
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
@@ -2097,57 +2176,76 @@ class Gui(wx.Frame):
         self.reset_view_button = wx.Button(
             self, wx.ID_ANY, self.t("reset_view")
         )
+        self.circuit_zoom_label = wx.StaticText(
+            self, wx.ID_ANY, self.t("circuit_zoom")
+        )
+        self.circuit_zoom_in_button = wx.Button(self, wx.ID_ANY, "+")
+        self.circuit_zoom_out_button = wx.Button(self, wx.ID_ANY, "-")
+        self.circuit_fit_button = wx.Button(
+            self, wx.ID_ANY, self.t("fit")
+        )
+        self.scope_zoom_label = wx.StaticText(
+            self, wx.ID_ANY, self.t("scope_zoom")
+        )
+        self.scope_zoom_in_button = wx.Button(self, wx.ID_ANY, "+")
+        self.scope_zoom_out_button = wx.Button(self, wx.ID_ANY, "-")
+        self.scope_fit_button = wx.Button(self, wx.ID_ANY, self.t("fit"))
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
         root_sizer = wx.BoxSizer(wx.VERTICAL)
-        toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        run_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        file_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
 
         self.switch_box = wx.StaticBox(self, label=self.t("switches"))
         self.monitor_box = wx.StaticBox(self, label=self.t("monitors"))
+        self.view_box = wx.StaticBox(self, label=self.t("view"))
         self.readings_box = wx.StaticBox(self, label=self.t("readings"))
         self.log_box = wx.StaticBox(self, label=self.t("log"))
+        self.reparent_side_panel_controls()
         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
+        view_box = wx.StaticBoxSizer(self.view_box, wx.VERTICAL)
         readings_box = wx.StaticBoxSizer(self.readings_box, wx.VERTICAL)
         log_box = wx.StaticBoxSizer(self.log_box, wx.VERTICAL)
 
-        toolbar_sizer.Add(self.cycles_label, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
-        toolbar_sizer.Add(self.cycles_spin, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.run_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.continue_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.step_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.auto_run_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.speed_label, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.speed_slider, 1,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 6)
-        toolbar_sizer.AddStretchSpacer()
-        toolbar_sizer.Add(self.open_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.save_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.export_circuit_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.export_scope_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.language_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.dark_mode_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.colour_blind_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.help_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        run_toolbar_sizer.Add(self.cycles_label, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
+        run_toolbar_sizer.Add(self.cycles_spin, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.run_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.continue_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.step_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.auto_run_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.speed_label, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.speed_slider, 1,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10)
+
+        file_toolbar_sizer.AddStretchSpacer()
+        file_toolbar_sizer.Add(self.open_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.save_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.export_circuit_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.export_scope_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.language_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.dark_mode_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.colour_blind_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.help_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
@@ -2165,23 +2263,70 @@ class Gui(wx.Frame):
         monitor_box.Add(self.remove_monitor_button, 0,
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
+
+        circuit_zoom_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        circuit_zoom_sizer.Add(self.circuit_zoom_out_button, 1,
+                               wx.EXPAND | wx.RIGHT, 4)
+        circuit_zoom_sizer.Add(self.circuit_zoom_in_button, 1,
+                               wx.EXPAND | wx.RIGHT, 4)
+        circuit_zoom_sizer.Add(self.circuit_fit_button, 1, wx.EXPAND)
+        scope_zoom_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        scope_zoom_sizer.Add(self.scope_zoom_out_button, 1,
+                             wx.EXPAND | wx.RIGHT, 4)
+        scope_zoom_sizer.Add(self.scope_zoom_in_button, 1,
+                             wx.EXPAND | wx.RIGHT, 4)
+        scope_zoom_sizer.Add(self.scope_fit_button, 1, wx.EXPAND)
+        view_box.Add(self.circuit_zoom_label, 0,
+                     wx.TOP | wx.LEFT | wx.RIGHT, 6)
+        view_box.Add(circuit_zoom_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        view_box.Add(self.scope_zoom_label, 0, wx.LEFT | wx.RIGHT, 6)
+        view_box.Add(scope_zoom_sizer, 0, wx.EXPAND | wx.ALL, 6)
+
         readings_box.Add(self.readings_list, 1, wx.EXPAND | wx.ALL, 6)
         log_box.Add(self.log_text, 1, wx.EXPAND | wx.ALL, 6)
 
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(view_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(readings_box, 1, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(log_box, 0, wx.EXPAND | wx.ALL, 6)
 
         display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
-        display_sizer.Add(
-            log_box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6
-        )
 
         main_sizer.Add(display_sizer, 1, wx.EXPAND)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        root_sizer.Add(toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        root_sizer.Add(run_toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        root_sizer.Add(file_toolbar_sizer, 0,
+                       wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
         self.SetSizer(root_sizer)
+
+    def reparent_side_panel_controls(self):
+        """Make side-panel widgets children of their native group boxes."""
+        for control in [
+            self.switch_label, self.switch_choice, self.switch_value,
+            self.set_switch_button,
+        ]:
+            control.Reparent(self.switch_box)
+
+        for control in [
+            self.add_monitor_label, self.add_monitor_choice,
+            self.add_monitor_button, self.remove_monitor_label,
+            self.remove_monitor_choice, self.remove_monitor_button,
+            self.reset_view_button,
+        ]:
+            control.Reparent(self.monitor_box)
+
+        for control in [
+            self.circuit_zoom_label, self.circuit_zoom_in_button,
+            self.circuit_zoom_out_button, self.circuit_fit_button,
+            self.scope_zoom_label, self.scope_zoom_in_button,
+            self.scope_zoom_out_button, self.scope_fit_button,
+        ]:
+            control.Reparent(self.view_box)
+
+        self.readings_list.Reparent(self.readings_box)
+        self.log_text.Reparent(self.log_box)
 
     def bind_events(self):
         """Bind widget events to handlers."""
@@ -2218,6 +2363,44 @@ class Gui(wx.Frame):
             wx.EVT_BUTTON, self.on_remove_monitor_button
         )
         self.reset_view_button.Bind(wx.EVT_BUTTON, self.on_reset_view_button)
+        self.circuit_zoom_in_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_circuit_zoom(1.25)
+        )
+        self.circuit_zoom_out_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_circuit_zoom(0.8)
+        )
+        self.circuit_fit_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_circuit_fit()
+        )
+        self.scope_zoom_in_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_scope_zoom(1.25)
+        )
+        self.scope_zoom_out_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_scope_zoom(0.8)
+        )
+        self.scope_fit_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_scope_fit()
+        )
+
+    def on_circuit_zoom(self, factor):
+        """Zoom the circuit overview and refresh the canvas."""
+        self.canvas.zoom_circuit(factor)
+        self.set_status("Circuit zoom updated.")
+
+    def on_circuit_fit(self):
+        """Fit more of the circuit overview into the viewport."""
+        self.canvas.fit_circuit()
+        self.set_status("Circuit overview fitted.")
+
+    def on_scope_zoom(self, factor):
+        """Zoom the oscilloscope time axis and refresh the canvas."""
+        self.canvas.zoom_scope(factor)
+        self.set_status("Oscilloscope zoom updated.")
+
+    def on_scope_fit(self):
+        """Fit more oscilloscope cycles into the viewport."""
+        self.canvas.fit_scope()
+        self.set_status("Oscilloscope fitted.")
 
     def on_menu(self, event):
         """Handle menu events."""
@@ -2323,6 +2506,7 @@ class Gui(wx.Frame):
 
         self.switch_box.SetLabel(self.t("switches"))
         self.monitor_box.SetLabel(self.t("monitors"))
+        self.view_box.SetLabel(self.t("view"))
         self.readings_box.SetLabel(self.t("readings"))
         self.log_box.SetLabel(self.t("log"))
         self.switch_label.SetLabel(self.t("switch"))
@@ -2333,6 +2517,10 @@ class Gui(wx.Frame):
         self.remove_monitor_label.SetLabel(self.t("current_monitors"))
         self.remove_monitor_button.SetLabel(self.t("remove_monitor"))
         self.reset_view_button.SetLabel(self.t("reset_view"))
+        self.circuit_zoom_label.SetLabel(self.t("circuit_zoom"))
+        self.circuit_fit_button.SetLabel(self.t("fit"))
+        self.scope_zoom_label.SetLabel(self.t("scope_zoom"))
+        self.scope_fit_button.SetLabel(self.t("fit"))
         self.apply_theme()
         self.Layout()
 

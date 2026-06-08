@@ -9,7 +9,7 @@ Classes
 Parser - parses the definition file and builds the logic network.
 """
 
-from typing import Sequence
+from typing import Optional, Sequence
 
 
 class Parser:
@@ -79,8 +79,14 @@ class Parser:
         self._expect_symbol(self.scanner.EOF, "expected end of file after END")
 
         self._report_unconnected_inputs()
+        self._print_session_separator_if_errors()
 
         return self.error_count == 0
+
+    def _print_session_separator_if_errors(self) -> None:
+        """Print spacing after a failed parse session in the terminal."""
+        if self.error_count > 0:
+            print("\n")
 
     def _parse_devices_section(self) -> None:
         """Parse the DEVICES section."""
@@ -135,7 +141,7 @@ class Parser:
         )
         self._handle_device_error(error, device_id)
 
-    def _parse_device_spec(self) -> tuple[int | None, object]:
+    def _parse_device_spec(self) -> tuple[int | None, int | None]:
         """Parse a device specification and return kind and property."""
         if self._is_keyword(self.scanner.SWITCH_ID):
             self._advance()
@@ -194,21 +200,6 @@ class Parser:
         self._report_syntax_error("expected device type")
         return None, None
 
-    def _parse_siggen_pattern(self) -> list[int]:
-        """Parse a SIGGEN waveform as a comma-separated list of bits."""
-        pattern = []
-        bit = self._parse_bit()
-        if bit is not None:
-            pattern.append(bit)
-
-        while self.symbol.type == self.scanner.COMMA:
-            self._advance()
-            bit = self._parse_bit()
-            if bit is not None:
-                pattern.append(bit)
-
-        return pattern
-
     def _parse_bit(self) -> int | None:
         """Parse a bit value, either 0 or 1."""
         if (self.symbol.type == self.scanner.NUMBER and
@@ -221,7 +212,7 @@ class Parser:
         self._advance_if_needed()
         return None
 
-    def _parse_positive_integer(self) -> int | None:
+    def _parse_positive_integer(self) -> Optional[int]:
         """Parse a positive integer."""
         if self.symbol.type == self.scanner.NUMBER and self.symbol.id > 0:
             value = self.symbol.id
@@ -273,20 +264,20 @@ class Parser:
             input_device_id, input_port_id
         )
 
-    def _parse_input_signal(self) -> tuple[int | None, int | None]:
+    def _parse_input_signal(self) -> tuple[Optional[int], Optional[int]]:
         """Parse an input signal and return device and input IDs."""
         device_id = self._parse_name("expected input device name")
         self._expect_symbol(self.scanner.DOT, "expected '.' in input signal")
         input_id = self._parse_input_port()
         return device_id, input_id
 
-    def _parse_input_port(self) -> int | None:
+    def _parse_input_port(self) -> Optional[int]:
         """Parse an input port keyword and return its ID."""
         return self._parse_keyword_from(
             self.input_port_ids, "expected input port"
         )
 
-    def _parse_output_signal(self) -> tuple[int | None, int | None]:
+    def _parse_output_signal(self) -> tuple[Optional[int], Optional[int]]:
         """Parse an output signal and return device and output IDs."""
         device_id = self._parse_name("expected output device name")
         output_id = None
@@ -297,7 +288,7 @@ class Parser:
 
         return device_id, output_id
 
-    def _parse_output_port(self) -> int | None:
+    def _parse_output_port(self) -> Optional[int]:
         """Parse a DTYPE output port keyword and return its ID."""
         return self._parse_keyword_from(
             self.dtype_output_ids, "expected output port Q or QBAR"
@@ -362,7 +353,7 @@ class Parser:
         error = self.monitors.make_monitor(device_id, output_id)
         self._handle_monitor_error(error, device_id, output_id)
 
-    def _parse_name(self, error_message: str) -> int | None:
+    def _parse_name(self, error_message: str) -> Optional[int]:
         """Parse a user-defined name and return its ID."""
         if self.symbol.type == self.scanner.NAME:
             name_id = self.symbol.id
@@ -379,7 +370,7 @@ class Parser:
         return None
 
     def _parse_keyword_from(self, accepted_ids: Sequence[int],
-                            error_message: str) -> int | None:
+                            error_message: str) -> Optional[int]:
         """Parse one keyword from accepted_ids and return its ID."""
         if (self.symbol.type == self.scanner.KEYWORD and
                 self.symbol.id in accepted_ids):
@@ -475,7 +466,7 @@ class Parser:
                 self.symbol.id in self.gate_type_ids)
 
     def _is_ambiguous_dtype_output(self, device_id: int,
-                                   output_id: int | None) -> bool:
+                                   output_id: Optional[int]) -> bool:
         """Return True if a DTYPE output has been used without Q or QBAR."""
         device = self.devices.get_device(device_id)
         return (device is not None and
@@ -510,7 +501,7 @@ class Parser:
             )
 
     def _handle_connection_error(self, error: int, output_device_id: int,
-                                 output_port_id: int | None,
+                                 output_port_id: Optional[int],
                                  input_device_id: int,
                                  input_port_id: int) -> None:
         """Report semantic errors returned by Network.make_connection."""
@@ -547,7 +538,7 @@ class Parser:
             )
 
     def _handle_monitor_error(self, error: int, device_id: int,
-                              output_id: int | None) -> None:
+                              output_id: Optional[int]) -> None:
         """Report semantic errors returned by Monitors.make_monitor."""
         if error == self.monitors.NO_ERROR:
             return
@@ -568,7 +559,7 @@ class Parser:
                 "monitor point " + monitor_name + " is listed more than once"
             )
 
-    def _signal_name(self, device_id: int, port_id: int | None) -> str:
+    def _signal_name(self, device_id: int, port_id: Optional[int]) -> str:
         """Return a readable signal name from IDs."""
         device_name = self.names.get_name_string(device_id)
         if device_name is None:
