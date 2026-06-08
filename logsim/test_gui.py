@@ -365,3 +365,26 @@ def test_reset_view_clears_canvas_scroll_and_zoom_state():
     assert canvas.follow_latest_cycles is False
     assert canvas.init is False
     assert refreshed == [True]
+
+
+def test_display_bounds_enforce_circuit_and_scope_minimum_regions():
+    """Test if sizing keeps circuit and scope independently readable."""
+    devices = FakeDevices([fake_device("A"), fake_device("OUT")])
+    canvas = make_canvas(devices)
+    canvas.min_circuit_height = 220
+    canvas.min_scope_height = 280
+    canvas.min_view_width = 760
+    canvas.canvas_horizontal_padding = 36
+    canvas.canvas_top_margin = 18
+    canvas.scope_y = 20
+    canvas.scope_gap = 8
+
+    circuit_bounds, scope_bounds = canvas.calculate_display_bounds(
+        SimpleNamespace(width=600, height=420)
+    )
+
+    assert circuit_bounds[2] >= canvas.min_view_width
+    assert circuit_bounds[3] >= canvas.min_circuit_height
+    assert scope_bounds[2] >= canvas.min_view_width
+    assert scope_bounds[3] >= canvas.min_scope_height
+    assert circuit_bounds[1] >= scope_bounds[1] + scope_bounds[3]
