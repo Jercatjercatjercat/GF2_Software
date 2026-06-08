@@ -1711,6 +1711,7 @@ class Gui(wx.Frame):
                 "save_file": "Save File",
                 "export_circuit": "Export Circuit",
                 "export_scope": "Export Scope",
+                "settings": "Settings",
                 "language": "Language",
                 "dark_mode": "Dark Mode",
                 "light_mode": "Light Mode",
@@ -1780,6 +1781,7 @@ class Gui(wx.Frame):
                 "save_file": "Enregistrer",
                 "export_circuit": "Exporter circuit",
                 "export_scope": "Exporter scope",
+                "settings": "Reglages",
                 "language": "Langue",
                 "dark_mode": "Mode sombre",
                 "light_mode": "Mode clair",
@@ -1845,6 +1847,7 @@ class Gui(wx.Frame):
                 "save_file": "Guardar",
                 "export_circuit": "Exportar circuito",
                 "export_scope": "Exportar scope",
+                "settings": "Ajustes",
                 "language": "Idioma",
                 "dark_mode": "Modo oscuro",
                 "light_mode": "Modo claro",
@@ -1911,6 +1914,7 @@ class Gui(wx.Frame):
                 "save_file": "Speichern",
                 "export_circuit": "Schaltung exportieren",
                 "export_scope": "Scope exportieren",
+                "settings": "Einstellungen",
                 "language": "Sprache",
                 "dark_mode": "Dunkelmodus",
                 "light_mode": "Hellmodus",
@@ -2014,8 +2018,7 @@ class Gui(wx.Frame):
             self.run_button, self.continue_button, self.step_button,
             self.auto_run_button, self.open_button, self.save_button,
             self.export_circuit_button, self.export_scope_button,
-            self.language_button, self.dark_mode_button,
-            self.colour_blind_button, self.help_button, self.set_switch_button,
+            self.settings_button, self.help_button, self.set_switch_button,
             self.add_monitor_button, self.remove_monitor_button,
             self.reset_view_button, self.circuit_zoom_in_button,
             self.circuit_zoom_out_button, self.circuit_fit_button,
@@ -2041,8 +2044,6 @@ class Gui(wx.Frame):
             control.SetBackgroundColour(theme["control"])
 
         self.log_text.SetBackgroundColour(theme["log"])
-        self.dark_mode_button.SetLabel(self.dark_mode_label())
-        self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
         self.Refresh()
         self.Layout()
 
@@ -2111,14 +2112,8 @@ class Gui(wx.Frame):
         self.export_scope_button = wx.Button(
             self, wx.ID_ANY, self.t("export_scope")
         )
-        self.language_button = wx.Button(
-            self, wx.ID_ANY, self.t("language")
-        )
-        self.dark_mode_button = wx.Button(
-            self, wx.ID_ANY, self.dark_mode_label()
-        )
-        self.colour_blind_button = wx.Button(
-            self, wx.ID_ANY, self.colour_blind_mode_label()
+        self.settings_button = wx.Button(
+            self, wx.ID_ANY, self.t("settings")
         )
         self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
@@ -2235,11 +2230,7 @@ class Gui(wx.Frame):
                                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         file_toolbar_sizer.Add(self.export_scope_button, 0,
                                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.language_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.dark_mode_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.colour_blind_button, 0,
+        file_toolbar_sizer.Add(self.settings_button, 0,
                                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         file_toolbar_sizer.Add(self.help_button, 0,
                                wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
@@ -2344,14 +2335,8 @@ class Gui(wx.Frame):
         self.export_scope_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_export_scope()
         )
-        self.language_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_language_button()
-        )
-        self.dark_mode_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_dark_mode_button()
-        )
-        self.colour_blind_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_colour_blind_button()
+        self.settings_button.Bind(
+            wx.EVT_BUTTON, lambda event: self.on_settings_button()
         )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
@@ -2418,8 +2403,9 @@ class Gui(wx.Frame):
         elif event_id == wx.ID_ABOUT:
             self.on_about()
 
-    def on_language_button(self):
-        """Show the language selection menu."""
+    def on_settings_button(self):
+        """Show rarely used display and language controls."""
+        settings_menu = wx.Menu()
         language_menu = wx.Menu()
         language_names = [
             ("en", "English"),
@@ -2440,8 +2426,33 @@ class Gui(wx.Frame):
                 id=item.GetId(),
             )
 
-        self.language_button.PopupMenu(language_menu)
-        language_menu.Destroy()
+        settings_menu.AppendSubMenu(language_menu, self.t("language"))
+        settings_menu.AppendSeparator()
+
+        dark_item = settings_menu.AppendCheckItem(
+            wx.ID_ANY, self.t("dark_mode")
+        )
+        dark_item.Check(self.dark_mode)
+        self.Bind(
+            wx.EVT_MENU, lambda event: self.on_dark_mode_button(),
+            id=dark_item.GetId()
+        )
+
+        colour_item = settings_menu.AppendCheckItem(
+            wx.ID_ANY, self.t("colour_blind_mode")
+        )
+        colour_item.Check(self.colour_blind_mode)
+        self.Bind(
+            wx.EVT_MENU, lambda event: self.on_colour_blind_button(),
+            id=colour_item.GetId()
+        )
+
+        self.settings_button.PopupMenu(settings_menu)
+        settings_menu.Destroy()
+
+    def on_language_button(self):
+        """Compatibility wrapper for older tests or handlers."""
+        self.on_settings_button()
 
     def set_language(self, language_code):
         """Switch visible GUI labels to the selected language."""
@@ -2496,9 +2507,7 @@ class Gui(wx.Frame):
         self.save_button.SetLabel(self.t("save_file"))
         self.export_circuit_button.SetLabel(self.t("export_circuit"))
         self.export_scope_button.SetLabel(self.t("export_scope"))
-        self.language_button.SetLabel(self.t("language"))
-        self.dark_mode_button.SetLabel(self.dark_mode_label())
-        self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
+        self.settings_button.SetLabel(self.t("settings"))
         self.help_button.SetLabel(self.t("help"))
 
         self.switch_box.SetLabel(self.t("switches"))
