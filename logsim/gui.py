@@ -19,8 +19,25 @@ from devices import Devices
 from network import Network
 from monitors import Monitors
 from scanner import Scanner
-from parse import Parser
+from parse import Parser, parse_network_with_diagnostics
 from gui_controller import GuiController
+
+
+def show_parse_error_dialog(parent, path, diagnostics):
+    """Show parser diagnostics in the GUI as well as the terminal."""
+    message = "The definition file could not be parsed.\n" + str(path)
+    diagnostics = diagnostics.strip()
+    if diagnostics:
+        message += "\n\n" + diagnostics
+    else:
+        message += "\n\nNo parser diagnostics were produced."
+
+    wx.MessageBox(
+        message,
+        "Definition File Error",
+        wx.OK | wx.ICON_ERROR,
+        parent,
+    )
 
 
 class MyGLCanvas(wxcanvas.GLCanvas):
@@ -2767,13 +2784,9 @@ class Gui(wx.Frame):
         scanner = Scanner(path, names)
         parser = Parser(names, devices, network, monitors, scanner)
 
-        if not parser.parse_network():
-            wx.MessageBox(
-                "The selected definition file could not be parsed.\n"
-                "Check the terminal for syntax or semantic errors.",
-                "File Load Error",
-                wx.OK | wx.ICON_ERROR,
-            )
+        success, diagnostics = parse_network_with_diagnostics(parser)
+        if not success:
+            show_parse_error_dialog(self, path, diagnostics)
             return
 
         self.path = path

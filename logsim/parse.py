@@ -9,7 +9,38 @@ Classes
 Parser - parses the definition file and builds the logic network.
 """
 
+import contextlib
+import io
+import sys
+
 from typing import List, Optional, Sequence, Tuple
+
+
+class OutputTee:
+    """Write parser diagnostics to the terminal and an in-memory buffer."""
+
+    def __init__(self, terminal, buffer):
+        """Store output targets."""
+        self.terminal = terminal
+        self.buffer = buffer
+
+    def write(self, text):
+        """Write text to both output targets."""
+        self.terminal.write(text)
+        self.buffer.write(text)
+
+    def flush(self):
+        """Flush the terminal output target."""
+        self.terminal.flush()
+
+
+def parse_network_with_diagnostics(parser):
+    """Parse while returning the same diagnostics printed to the terminal."""
+    diagnostic_buffer = io.StringIO()
+    with contextlib.redirect_stdout(
+            OutputTee(sys.stdout, diagnostic_buffer)):
+        success = parser.parse_network()
+    return success, diagnostic_buffer.getvalue()
 
 
 class Parser:

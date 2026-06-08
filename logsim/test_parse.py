@@ -7,7 +7,7 @@ from devices import Devices
 from monitors import Monitors
 from names import Names
 from network import Network
-from parse import Parser
+from parse import Parser, parse_network_with_diagnostics
 from scanner import Scanner
 
 
@@ -644,3 +644,27 @@ END;
     assert "    123A : SWITCH(0);\n    ^" in output
     assert output.endswith("\n\n")
 
+
+
+def test_parse_network_with_diagnostics_returns_terminal_output(
+        tmp_path, capsys):
+    """Test if GUI parsing can reuse terminal parser diagnostics."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            SW1 : SWITCH(0);
+        }
+        CONNECT {
+        }
+        MONITOR { NO_SUCH_DEVICE };
+        END;
+        """,
+    )
+
+    success, diagnostics = parse_network_with_diagnostics(parser)
+    terminal_output = capsys.readouterr().out
+
+    assert not success
+    assert "Semantic error" in diagnostics
+    assert "monitor refers to undefined device NO_SUCH_DEVICE" in diagnostics
+    assert diagnostics == terminal_output

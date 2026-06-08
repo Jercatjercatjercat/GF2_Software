@@ -19,7 +19,7 @@ from devices import Devices
 from network import Network
 from monitors import Monitors
 from scanner import Scanner
-from parse import Parser
+from parse import Parser, parse_network_with_diagnostics
 from userint import UserInterface
 
 
@@ -68,16 +68,22 @@ def main(arg_list):
         [path] = arguments
         scanner = Scanner(path, names)
         parser = Parser(names, devices, network, monitors, scanner)
-        if parser.parse_network():
-            # Initialise an instance of the gui.Gui() class
-            import wx
-            from gui import Gui
+        success, diagnostics = parse_network_with_diagnostics(parser)
 
-            app = wx.App()
+        # Initialise wx here so GUI parse errors can be reported both in the
+        # terminal and in a graphical dialog.
+        import wx
+        from gui import Gui, show_parse_error_dialog
+
+        app = wx.App()
+        if success:
             gui = Gui("Logic Simulator", path, names, devices, network,
                       monitors)
             gui.Show(True)
             app.MainLoop()
+        else:
+            show_parse_error_dialog(None, path, diagnostics)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
