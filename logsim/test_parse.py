@@ -617,7 +617,7 @@ END;
     assert not parser.parse_network()
     output = capsys.readouterr().out
     assert (
-        "Syntax error at line 2, column 1: "
+        "Error at line 2, column 1: "
         "invalid symbol: unterminated block comment"
     ) in output
     assert "/* not properly closed\n^" in output
@@ -640,7 +640,7 @@ END;
 
     assert not parser.parse_network()
     output = capsys.readouterr().out
-    assert "Syntax error at line 2, column 5" in output
+    assert "Error at line 2, column 5" in output
     assert "    123A : SWITCH(0);\n    ^" in output
     assert output.endswith("\n\n")
 
@@ -665,6 +665,6 @@ def test_parse_network_with_diagnostics_returns_terminal_output(
     terminal_output = capsys.readouterr().out
 
     assert not success
-    assert "Semantic error" in diagnostics
+    assert "Error at line" in diagnostics
     assert "monitor refers to undefined device NO_SUCH_DEVICE" in diagnostics
     assert diagnostics == terminal_output

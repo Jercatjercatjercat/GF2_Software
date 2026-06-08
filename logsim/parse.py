@@ -451,23 +451,23 @@ class Parser:
     def _report_syntax_error(self, message: str) -> None:
         """Report a syntax error."""
         self.error_count += 1
-        print(self._format_error("Syntax", message))
+        print(self._format_error(message))
         self._print_error_pointer()
 
     def _report_semantic_error(self, message: str) -> None:
         """Report a semantic error."""
         self.error_count += 1
-        print(self._format_error("Semantic", message))
+        print(self._format_error(message))
         self._print_error_pointer()
 
     def _report_invalid_symbol(self) -> None:
         """Report an invalid scanner symbol."""
         self._report_syntax_error("invalid symbol: " + str(self.symbol.id))
 
-    def _format_error(self, error_type: str, message: str) -> str:
+    def _format_error(self, message: str) -> str:
         """Return a formatted error message with source location."""
         return (
-            f"{error_type} error at line {self.symbol.line_number}, "
+            f"Error at line {self.symbol.line_number}, "
             f"column {self.symbol.position}: {message}"
         )
 
