@@ -14,6 +14,14 @@ import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLUT
 
+from language import (
+    DEFAULT_LANGUAGE,
+    choose_language,
+    initialise_wx_locale,
+    load_language_names,
+    load_translations,
+    translate,
+)
 from names import Names
 from devices import Devices
 from network import Network
@@ -25,16 +33,23 @@ from gui_controller import GuiController
 
 def show_parse_error_dialog(parent, path, diagnostics):
     """Show parser diagnostics in the GUI as well as the terminal."""
-    message = "The definition file could not be parsed.\n" + str(path)
+    translations = load_translations()
+    language_code = choose_language(translations, wx)
+
+    def t(key):
+        """Return translated text for the parser dialog."""
+        return translate(translations, language_code, key)
+
+    message = t("parse_error_intro") + "\n" + str(path)
     diagnostics = diagnostics.strip()
     if diagnostics:
         message += "\n\n" + diagnostics
     else:
-        message += "\n\nNo parser diagnostics were produced."
+        message += "\n\n" + t("parse_error_empty")
 
     wx.MessageBox(
         message,
-        "Definition File Error",
+        t("parse_error_title"),
         wx.OK | wx.ICON_ERROR,
         parent,
     )
@@ -43,7 +58,7 @@ def show_parse_error_dialog(parent, path, diagnostics):
 class MyGLCanvas(wxcanvas.GLCanvas):
     """Draw monitor waveforms in an OpenGL canvas."""
 
-    def __init__(self, parent, devices, monitors):
+    def __init__(self, parent, devices, monitors, translator=None):
         """Initialise canvas state and event bindings."""
         super().__init__(
             parent,
@@ -61,6 +76,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.context = wxcanvas.GLContext(self)
         self.devices = devices
         self.monitors = monitors
+        self.translator = translator
 
         self.pan_x = 0
         self.pan_y = 0
@@ -119,6 +135,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Bind(wx.EVT_PAINT, self.on_paint)
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
+
+    def set_translator(self, translator):
+        """Set the function used for canvas UI text."""
+        self.translator = translator
+        self.Refresh()
+
+    def text(self, key):
+        """Return translated canvas text."""
+        translator = getattr(self, "translator", None)
+        if translator is None:
+            return translate(load_translations(), DEFAULT_LANGUAGE, key)
+        return translator(key)
 
     def reset_view(self):
         """Reset pan, zoom, and oscilloscope scroll to their defaults."""
@@ -479,7 +507,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.theme_colour("circuit_bg"),
             self.theme_colour("circuit_border"),
         )
-        self.render_text("Circuit overview", x_pos + 10, y_pos + height - 20)
+        self.render_text(
+            self.text("circuit_overview"), x_pos + 10, y_pos + height - 20
+        )
 
         view_bounds = (x_pos + 10, y_pos + 26, width - 32, height - 64)
         view_x, view_y, view_width, view_height = view_bounds
@@ -868,7 +898,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         if not monitor_items:
             self.render_text(
-                "No monitor points selected.",
+                self.text("no_monitors"),
                 scope_x + 20,
                 scope_y + scope_height - 78,
             )
@@ -909,7 +939,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             ]
 
             self.render_text(
-                "Press Run to record signal traces.",
+                self.text("press_run"),
                 scope_x + 20,
                 scope_y + scope_height - 50,
                 self.theme_colour("subtle_text"),
@@ -979,7 +1009,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.theme_colour("scope_header"),
             self.theme_colour("scope_header_border"),
         )
-        self.render_text("Oscilloscope", x_pos + 30, y_pos + height - 18)
+        self.render_text(self.text("oscilloscope"),
+                         x_pos + 30, y_pos + height - 18)
         self.draw_rectangle(
             (x_pos + 9, y_pos + height - 21, 12, 12),
             self.theme_colour("scope_icon"),
@@ -1246,11 +1277,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         last_cycle = max(first_cycle + cycle_count - 1, first_cycle)
         last_cycle = min(last_cycle, max(max_cycles - 1, 0))
         self.render_text(
-            "Cycles shown: " + str(first_cycle) + "-" + str(last_cycle),
+            self.text("cycles_shown").format(
+                first=first_cycle, last=last_cycle
+            ),
             plot_x + 28, plot_y - 76, self.theme_colour("axis")
         )
         self.render_text(
-            "Level", plot_x - 38, plot_y - 76,
+            self.text("level"), plot_x - 38, plot_y - 76,
             self.theme_colour("subtle_text")
         )
 
@@ -1678,12 +1711,18 @@ class Gui(wx.Frame):
 
     def __init__(self, title, path, names, devices, network, monitors):
         """Initialise widgets, controller, and layout."""
-        super().__init__(parent=None, title=title, size=(1120, 760))
+        self.wx_locale = initialise_wx_locale(wx)
+        self.translations = self.build_translations()
+        self.language_names = self.build_language_names()
+        self.current_language = choose_language(self.translations, wx)
+        translated_title = self.t("window_title")
+        if translated_title == "window_title":
+            translated_title = title
+
+        super().__init__(parent=None, title=translated_title, size=(1120, 760))
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
-        self.current_language = "en"
-        self.translations = self.build_translations()
         self.dark_mode = False
         self.colour_blind_mode = False
         self.controller = GuiController(names, devices, network, monitors)
@@ -1693,297 +1732,33 @@ class Gui(wx.Frame):
 
         self.configure_menu()
         self.CreateStatusBar()
-        self.canvas = MyGLCanvas(self, devices, monitors)
+        self.canvas = MyGLCanvas(self, devices, monitors, translator=self.t)
         self.create_controls()
         self.configure_layout()
         self.bind_events()
         self.apply_theme()
         self.remember_default_monitors()
         self.refresh_choices()
-        self.set_status("Loaded " + path)
+        self.set_status(self.format_text("loaded_file", path=path))
 
         min_canvas_width, min_canvas_height = self.canvas.minimum_visual_size()
         self.SetSizeHints(min_canvas_width + 420, min_canvas_height + 170)
 
     def build_translations(self):
         """Return UI label translations keyed by language code."""
-        return {
-            "en": {
-                "menu_file": "&File",
-                "menu_help": "&Help",
-                "menu_open": "&Open definition file...",
-                "menu_save": "&Save definition as...",
-                "menu_export_circuit": "&Export circuit...",
-                "menu_export_scope": "&Export oscilloscope...",
-                "menu_exit": "&Exit",
-                "menu_help_item": "&Help",
-                "menu_about": "&About",
-                "cycles": "Cycles",
-                "run": "Run",
-                "continue": "Continue",
-                "step": "Step",
-                "auto_run": "Auto Run",
-                "auto_speed": "Auto speed",
-                "open_file": "Open File",
-                "save_file": "Save File",
-                "export_circuit": "Export Circuit",
-                "export_scope": "Export Scope",
-                "settings": "Settings",
-                "language": "Language",
-                "dark_mode": "Dark Mode",
-                "light_mode": "Light Mode",
-                "colour_blind_mode": "Colour Blind",
-                "standard_colours": "Standard Colours",
-                "help": "Help",
-                "switches": "Switches",
-                "monitors": "Monitors",
-                "view": "View",
-                "readings": "Readings",
-                "log": "Log",
-                "switch": "Switch",
-                "value": "Value",
-                "set_switch": "Set Switch",
-                "available_signals": "Available signals",
-                "add_monitor": "Add Monitor",
-                "current_monitors": "Current monitors",
-                "remove_monitor": "Remove Monitor",
-                "reset_view": "Reset View",
-                "circuit_zoom": "Circuit zoom",
-                "scope_zoom": "Scope zoom",
-                "fit": "Fit",
-                "status_prefix": "Status",
-                "language_changed": "Language changed.",
-                "dark_mode_enabled": "Dark mode enabled.",
-                "light_mode_enabled": "Light mode enabled.",
-                "colour_blind_enabled": "Colour-blind mode enabled.",
-                "colour_blind_disabled": "Standard colours enabled.",
-                "help_title": "Interface Help",
-                "about_title": "About Logsim",
-                "about_text": (
-                    "GF2 Logic Simulator\n"
-                    "Graphical interface with circuit overview and "
-                    "oscilloscope."
-                ),
-                "help_text": (
-                    "Run: cold-starts the circuit and records N cycles.\n"
-                    "Continue: records N more cycles without clearing "
-                    "traces.\n"
-                    "Step: advances by one cycle.\n"
-                    "Auto Run: keeps stepping until you stop it.\n"
-                    "Set Switch: changes the selected switch to 0 or 1.\n"
-                    "Add/Remove Monitor: controls which outputs are shown.\n"
-                    "Mouse drag pans the display; mouse wheel zooms it.\n"
-                    "Over the oscilloscope, the mouse wheel scrolls signal "
-                    "rows.\n"
-                    "File > Open loads another definition file."
-                ),
-            },
-            "fr": {
-                "menu_file": "&Fichier",
-                "menu_help": "&Aide",
-                "menu_open": "&Ouvrir un fichier...",
-                "menu_save": "&Enregistrer sous...",
-                "menu_export_circuit": "&Exporter le circuit...",
-                "menu_export_scope": "&Exporter oscilloscope...",
-                "menu_exit": "&Quitter",
-                "menu_help_item": "&Aide",
-                "menu_about": "&A propos",
-                "cycles": "Cycles",
-                "run": "Lancer",
-                "continue": "Continuer",
-                "step": "Pas",
-                "auto_run": "Auto",
-                "auto_speed": "Vitesse auto",
-                "open_file": "Ouvrir",
-                "save_file": "Enregistrer",
-                "export_circuit": "Exporter circuit",
-                "export_scope": "Exporter scope",
-                "settings": "Reglages",
-                "language": "Langue",
-                "dark_mode": "Mode sombre",
-                "light_mode": "Mode clair",
-                "colour_blind_mode": "Daltonien",
-                "standard_colours": "Couleurs standard",
-                "help": "Aide",
-                "switches": "Interrupteurs",
-                "monitors": "Moniteurs",
-                "readings": "Lectures",
-                "log": "Journal",
-                "switch": "Interrupteur",
-                "value": "Valeur",
-                "set_switch": "Regler interrupteur",
-                "available_signals": "Signaux disponibles",
-                "add_monitor": "Ajouter moniteur",
-                "current_monitors": "Moniteurs actuels",
-                "remove_monitor": "Retirer moniteur",
-                "reset_view": "Reinitialiser vue",
-                "circuit_zoom": "Zoom circuit",
-                "scope_zoom": "Zoom scope",
-                "fit": "Ajuster",
-                "status_prefix": "Statut",
-                "language_changed": "Langue modifiee.",
-                "dark_mode_enabled": "Mode sombre active.",
-                "light_mode_enabled": "Mode clair active.",
-                "colour_blind_enabled": "Mode daltonien active.",
-                "colour_blind_disabled": "Couleurs standard activees.",
-                "help_title": "Aide interface",
-                "about_title": "A propos de Logsim",
-                "about_text": (
-                    "Simulateur logique GF2\n"
-                    "Interface graphique avec circuit et oscilloscope."
-                ),
-                "help_text": (
-                    "Lancer: demarre le circuit et enregistre N cycles.\n"
-                    "Continuer: ajoute N cycles sans effacer les traces.\n"
-                    "Pas: avance d'un cycle.\n"
-                    "Auto: avance jusqu'a l'arret.\n"
-                    "Regler interrupteur: change un interrupteur a 0 ou 1.\n"
-                    "Ajouter/Retirer moniteur: choisit les sorties visibles.\n"
-                    "Glisser la souris deplace la vue; la molette zoome.\n"
-                    "Sur l'oscilloscope, la molette fait defiler les lignes.\n"
-                    "Fichier > Ouvrir charge un autre fichier."
-                ),
-            },
-            "es": {
-                "menu_file": "&Archivo",
-                "menu_help": "A&yuda",
-                "menu_open": "&Abrir archivo...",
-                "menu_save": "&Guardar como...",
-                "menu_export_circuit": "&Exportar circuito...",
-                "menu_export_scope": "&Exportar osciloscopio...",
-                "menu_exit": "&Salir",
-                "menu_help_item": "A&yuda",
-                "menu_about": "&Acerca de",
-                "cycles": "Ciclos",
-                "run": "Ejecutar",
-                "continue": "Continuar",
-                "step": "Paso",
-                "auto_run": "Auto",
-                "auto_speed": "Velocidad",
-                "open_file": "Abrir",
-                "save_file": "Guardar",
-                "export_circuit": "Exportar circuito",
-                "export_scope": "Exportar scope",
-                "settings": "Ajustes",
-                "language": "Idioma",
-                "dark_mode": "Modo oscuro",
-                "light_mode": "Modo claro",
-                "colour_blind_mode": "Daltonismo",
-                "standard_colours": "Colores estandar",
-                "help": "Ayuda",
-                "switches": "Interruptores",
-                "monitors": "Monitores",
-                "view": "Vista",
-                "readings": "Lecturas",
-                "log": "Registro",
-                "switch": "Interruptor",
-                "value": "Valor",
-                "set_switch": "Cambiar interruptor",
-                "available_signals": "Senales disponibles",
-                "add_monitor": "Agregar monitor",
-                "current_monitors": "Monitores actuales",
-                "remove_monitor": "Quitar monitor",
-                "reset_view": "Reiniciar vista",
-                "circuit_zoom": "Zoom circuito",
-                "scope_zoom": "Zoom scope",
-                "fit": "Ajustar",
-                "status_prefix": "Estado",
-                "language_changed": "Idioma cambiado.",
-                "dark_mode_enabled": "Modo oscuro activado.",
-                "light_mode_enabled": "Modo claro activado.",
-                "colour_blind_enabled": "Modo daltonismo activado.",
-                "colour_blind_disabled": "Colores estandar activados.",
-                "help_title": "Ayuda de interfaz",
-                "about_title": "Acerca de Logsim",
-                "about_text": (
-                    "Simulador logico GF2\n"
-                    "Interfaz grafica con circuito y osciloscopio."
-                ),
-                "help_text": (
-                    "Ejecutar: inicia el circuito y graba N ciclos.\n"
-                    "Continuar: graba N ciclos mas sin borrar trazas.\n"
-                    "Paso: avanza un ciclo.\n"
-                    "Auto: avanza hasta que lo detengas.\n"
-                    "Cambiar interruptor: pone el interruptor en 0 o 1.\n"
-                    "Agregar/Quitar monitor: controla las salidas visibles.\n"
-                    "Arrastrar mueve la vista; la rueda hace zoom.\n"
-                    "Sobre el osciloscopio, la rueda desplaza senales.\n"
-                    "Archivo > Abrir carga otro archivo."
-                ),
-            },
-            "de": {
-                "menu_file": "&Datei",
-                "menu_help": "&Hilfe",
-                "menu_open": "&Datei offnen...",
-                "menu_save": "&Speichern unter...",
-                "menu_export_circuit": "&Schaltung exportieren...",
-                "menu_export_scope": "&Oszilloskop exportieren...",
-                "menu_exit": "&Beenden",
-                "menu_help_item": "&Hilfe",
-                "menu_about": "&Info",
-                "cycles": "Zyklen",
-                "run": "Start",
-                "continue": "Weiter",
-                "step": "Schritt",
-                "auto_run": "Auto",
-                "auto_speed": "Auto Tempo",
-                "open_file": "Offnen",
-                "save_file": "Speichern",
-                "export_circuit": "Schaltung exportieren",
-                "export_scope": "Scope exportieren",
-                "settings": "Einstellungen",
-                "language": "Sprache",
-                "dark_mode": "Dunkelmodus",
-                "light_mode": "Hellmodus",
-                "colour_blind_mode": "Farbenblind",
-                "standard_colours": "Standardfarben",
-                "help": "Hilfe",
-                "switches": "Schalter",
-                "monitors": "Monitore",
-                "view": "Ansicht",
-                "readings": "Werte",
-                "log": "Log",
-                "switch": "Schalter",
-                "value": "Wert",
-                "set_switch": "Schalter setzen",
-                "available_signals": "Verfugbare Signale",
-                "add_monitor": "Monitor hinzufugen",
-                "current_monitors": "Aktuelle Monitore",
-                "remove_monitor": "Monitor entfernen",
-                "reset_view": "Ansicht reset",
-                "circuit_zoom": "Schaltung zoom",
-                "scope_zoom": "Scope zoom",
-                "fit": "Einpassen",
-                "status_prefix": "Status",
-                "language_changed": "Sprache geandert.",
-                "dark_mode_enabled": "Dunkelmodus aktiviert.",
-                "light_mode_enabled": "Hellmodus aktiviert.",
-                "colour_blind_enabled": "Farbenblind-Modus aktiviert.",
-                "colour_blind_disabled": "Standardfarben aktiviert.",
-                "help_title": "Hilfe",
-                "about_title": "Info zu Logsim",
-                "about_text": (
-                    "GF2 Logiksimulator\n"
-                    "Grafische Oberflache mit Schaltung und Oszilloskop."
-                ),
-                "help_text": (
-                    "Start: startet die Schaltung und speichert N Zyklen.\n"
-                    "Weiter: speichert N weitere Zyklen ohne zu loschen.\n"
-                    "Schritt: fuhrt einen Zyklus aus.\n"
-                    "Auto: lauft weiter bis zum Stoppen.\n"
-                    "Schalter setzen: setzt den Schalter auf 0 oder 1.\n"
-                    "Monitor hinzufugen/entfernen: wahlt sichtbare Ausgange.\n"
-                    "Mausziehen verschiebt die Ansicht; Mausrad zoomt.\n"
-                    "Uber dem Oszilloskop scrollt das Mausrad Signalzeilen.\n"
-                    "Datei > Offnen ladt eine andere Datei."
-                ),
-            },
-        }
+        return load_translations()
+
+    def build_language_names(self):
+        """Return display names for configured languages."""
+        return load_language_names()
 
     def t(self, key):
         """Translate a UI label for the current language."""
-        language = self.translations.get(self.current_language, {})
-        return language.get(key, self.translations["en"].get(key, key))
+        return translate(self.translations, self.current_language, key)
+
+    def format_text(self, key, **values):
+        """Translate a UI label and format named placeholders."""
+        return self.t(key).format(**values)
 
     def dark_mode_label(self):
         """Return the mode toggle label for the current state."""
@@ -2235,8 +2010,10 @@ class Gui(wx.Frame):
                               wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
         run_toolbar_sizer.Add(self.speed_label, 0,
                               wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        run_toolbar_sizer.Add(self.speed_slider, 1,
-                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10)
+        run_toolbar_sizer.Add(
+            self.speed_slider, 1,
+            wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10
+        )
 
         file_toolbar_sizer.AddStretchSpacer()
         file_toolbar_sizer.Add(self.open_button, 0,
@@ -2384,22 +2161,22 @@ class Gui(wx.Frame):
     def on_circuit_zoom(self, factor):
         """Zoom the circuit overview and refresh the canvas."""
         self.canvas.zoom_circuit(factor)
-        self.set_status("Circuit zoom updated.")
+        self.set_status(self.t("circuit_zoom_updated"))
 
     def on_circuit_fit(self):
         """Fit more of the circuit overview into the viewport."""
         self.canvas.fit_circuit()
-        self.set_status("Circuit overview fitted.")
+        self.set_status(self.t("circuit_overview_fitted"))
 
     def on_scope_zoom(self, factor):
         """Zoom the oscilloscope time axis and refresh the canvas."""
         self.canvas.zoom_scope(factor)
-        self.set_status("Oscilloscope zoom updated.")
+        self.set_status(self.t("scope_zoom_updated"))
 
     def on_scope_fit(self):
         """Fit more oscilloscope cycles into the viewport."""
         self.canvas.fit_scope()
-        self.set_status("Oscilloscope fitted.")
+        self.set_status(self.t("scope_fitted"))
 
     def on_menu(self, event):
         """Handle menu events."""
@@ -2424,14 +2201,8 @@ class Gui(wx.Frame):
         """Show rarely used display and language controls."""
         settings_menu = wx.Menu()
         language_menu = wx.Menu()
-        language_names = [
-            ("en", "English"),
-            ("fr", "Francais"),
-            ("es", "Espanol"),
-            ("de", "Deutsch"),
-        ]
 
-        for language_code, language_name in language_names:
+        for language_code, language_name in self.language_names.items():
             item = language_menu.AppendRadioItem(
                 wx.ID_ANY, language_name
             )
@@ -2477,6 +2248,7 @@ class Gui(wx.Frame):
             return
 
         self.current_language = language_code
+        self.canvas.set_translator(self.t)
         self.update_language_labels()
         self.set_status(self.t("language_changed"))
 
@@ -2500,6 +2272,7 @@ class Gui(wx.Frame):
 
     def update_language_labels(self):
         """Apply the current language to visible menus and controls."""
+        self.SetTitle(self.t("window_title"))
         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
         self.menu_bar.SetMenuLabel(1, self.t("menu_help"))
         self.open_menu_item.SetItemLabel(self.t("menu_open"))
@@ -2544,6 +2317,7 @@ class Gui(wx.Frame):
         self.circuit_fit_button.SetLabel(self.t("fit"))
         self.scope_zoom_label.SetLabel(self.t("scope_zoom"))
         self.scope_fit_button.SetLabel(self.t("fit"))
+        self.canvas.set_translator(self.t)
         self.apply_theme()
         self.Layout()
 
@@ -2582,10 +2356,10 @@ class Gui(wx.Frame):
         if self.auto_run_button.GetValue():
             self.canvas.follow_latest_cycles = True
             self.auto_timer.Start(self.get_auto_delay())
-            self.set_status("Auto run started.")
+            self.set_status(self.t("auto_run_started"))
         else:
             self.stop_auto_run()
-            self.set_status("Auto run stopped.")
+            self.set_status(self.t("auto_run_stopped"))
 
     def on_auto_timer(self, event):
         """Advance one cycle whenever the auto-run timer fires."""
@@ -2619,7 +2393,7 @@ class Gui(wx.Frame):
         """Set the selected switch to the selected value."""
         switch_name = self.get_choice_value(self.switch_choice)
         if switch_name is None:
-            self.after_action(False, "No switch selected.")
+            self.after_action(False, self.t("no_switch_selected"))
             return
 
         success, message = self.controller.set_switch(
@@ -2631,7 +2405,7 @@ class Gui(wx.Frame):
         """Add the selected signal as a monitor."""
         signal_name = self.get_choice_value(self.add_monitor_choice)
         if signal_name is None:
-            self.after_action(False, "No available signal selected.")
+            self.after_action(False, self.t("no_available_signal_selected"))
             return
 
         success, message = self.controller.add_monitor(signal_name)
@@ -2641,7 +2415,7 @@ class Gui(wx.Frame):
         """Remove the selected monitor."""
         signal_name = self.get_choice_value(self.remove_monitor_choice)
         if signal_name is None:
-            self.after_action(False, "No current monitor selected.")
+            self.after_action(False, self.t("no_current_monitor_selected"))
             return
 
         self.archive_default_monitor(signal_name)
@@ -2653,14 +2427,14 @@ class Gui(wx.Frame):
         self.restore_default_monitors()
         self.refresh_choices()
         self.canvas.reset_view()
-        self.set_status("View reset.")
+        self.set_status(self.t("view_reset"))
 
     def on_open_file(self):
         """Load and parse a new definition file selected by the user."""
         with wx.FileDialog(
             self,
-            "Open logic definition file",
-            wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+            self.t("open_dialog_title"),
+            wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as dialog:
             if dialog.ShowModal() == wx.ID_CANCEL:
@@ -2676,10 +2450,10 @@ class Gui(wx.Frame):
 
         with wx.FileDialog(
             self,
-            "Save logic definition file",
+            self.t("save_dialog_title"),
             defaultDir=default_dir,
             defaultFile=default_file,
-            wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+            wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
             if dialog.ShowModal() == wx.ID_CANCEL:
@@ -2689,21 +2463,21 @@ class Gui(wx.Frame):
         try:
             if os.path.abspath(save_path) != os.path.abspath(self.path):
                 shutil.copyfile(self.path, save_path)
-            self.set_status("Saved file to " + save_path)
+            self.set_status(self.format_text("saved_file", path=save_path))
         except OSError as error:
             wx.MessageBox(
-                "The file could not be saved.\n" + str(error),
-                "File Save Error",
+                self.format_text("file_save_error_body", error=error),
+                self.t("file_save_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status("Could not save file.", error=True)
+            self.set_status(self.t("file_save_failed"), error=True)
 
     def on_export_circuit(self):
         """Export the current circuit overview to an image or PDF."""
         default_dir = os.path.dirname(self.path)
         base_name = os.path.splitext(os.path.basename(self.path))[0]
         export_path = self.choose_export_path(
-            "Export logic circuit",
+            self.t("export_circuit_dialog_title"),
             default_dir,
             base_name + "_circuit.png",
         )
@@ -2712,23 +2486,25 @@ class Gui(wx.Frame):
 
         try:
             if self.canvas.save_circuit_image(export_path):
-                self.set_status("Exported circuit to " + export_path)
+                self.set_status(
+                    self.format_text("exported_circuit", path=export_path)
+                )
             else:
-                self.set_status("Could not export circuit.", error=True)
+                self.set_status(self.t("export_circuit_failed"), error=True)
         except Exception as error:
             wx.MessageBox(
-                "The circuit image could not be exported.\n" + str(error),
-                "Circuit Export Error",
+                self.format_text("circuit_export_error_body", error=error),
+                self.t("circuit_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status("Could not export circuit.", error=True)
+            self.set_status(self.t("export_circuit_failed"), error=True)
 
     def on_export_scope(self):
         """Export the current oscilloscope view to an image or PDF."""
         default_dir = os.path.dirname(self.path)
         base_name = os.path.splitext(os.path.basename(self.path))[0]
         export_path = self.choose_export_path(
-            "Export oscilloscope",
+            self.t("export_scope_dialog_title"),
             default_dir,
             base_name + "_oscilloscope.png",
         )
@@ -2737,17 +2513,18 @@ class Gui(wx.Frame):
 
         try:
             if self.canvas.save_scope_image(export_path):
-                self.set_status("Exported oscilloscope to " + export_path)
+                self.set_status(
+                    self.format_text("exported_scope", path=export_path)
+                )
             else:
-                self.set_status("Could not export oscilloscope.", error=True)
+                self.set_status(self.t("export_scope_failed"), error=True)
         except Exception as error:
             wx.MessageBox(
-                "The oscilloscope image could not be exported.\n"
-                + str(error),
-                "Oscilloscope Export Error",
+                self.format_text("scope_export_error_body", error=error),
+                self.t("scope_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status("Could not export oscilloscope.", error=True)
+            self.set_status(self.t("export_scope_failed"), error=True)
 
     def choose_export_path(self, title, default_dir, default_file):
         """Return a PNG or PDF path selected by the user."""
@@ -2756,7 +2533,7 @@ class Gui(wx.Frame):
             title,
             defaultDir=default_dir,
             defaultFile=default_file,
-            wildcard="PNG image (*.png)|*.png|PDF document (*.pdf)|*.pdf",
+            wildcard=self.t("export_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
             if dialog.ShowModal() == wx.ID_CANCEL:
@@ -2796,7 +2573,7 @@ class Gui(wx.Frame):
         self.canvas.reset_view()
         self.remember_default_monitors()
         self.refresh_choices()
-        self.set_status("Loaded " + path)
+        self.set_status(self.format_text("loaded_file", path=path))
 
     def on_help(self):
         """Display a concise user guide."""
@@ -2914,9 +2691,9 @@ class Gui(wx.Frame):
 
     def set_status(self, message, error=False):
         """Show a status message to the user."""
-        prefix = "Error: " if error else ""
+        prefix = self.t("error_prefix") + ": " if error else ""
         status_text = (
-            prefix + message + "\nCycles completed: "
+            prefix + message + "\n" + self.t("cycles_completed") + ": "
             + str(self.controller.cycles_completed)
         )
         self.SetStatusText(

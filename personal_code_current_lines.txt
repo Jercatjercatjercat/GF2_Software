@@ -1,0 +1,3752 @@
+Personal Git-attributed current lines
+Matched identities: 157899332+hayyankiani05@users.noreply.github.com, Hayyan Kiani, mk2227@cam.ac.uk
+Generated from: git blame -w --line-porcelain
+
+==============================================================================
+logsim/gui.py
+==============================================================================
+    3: The GUI mirrors the required command-line operations: run, continue, set a
+    4: switch, add a monitor, and remove a monitor.  Signal traces are drawn in an
+    5: OpenGL canvas and can be panned or zoomed with the mouse.
+    7: 
+    8: import math
+    9: import os
+   10: import shutil
+   11: import zlib
+   12: 
+   17: from names import Names
+   18: from devices import Devices
+   19: from network import Network
+   20: from monitors import Monitors
+   21: from scanner import Scanner
+   22: from parse import Parser
+   23: from gui_controller import GuiController
+   27:     """Draw monitor waveforms in an OpenGL canvas."""
+   30:         """Initialise canvas state and event bindings."""
+   31:         super().__init__(
+   32:             parent,
+   33:             -1,
+   34:             attribList=[
+   35:                 wxcanvas.WX_GL_RGBA,
+   37:                 wxcanvas.WX_GL_DEPTH_SIZE,
+   38:                 16,
+   39:                 0,
+   40:             ],
+   41:         )
+   45:         self.devices = devices
+   46:         self.monitors = monitors
+   50:         self.last_mouse_x = 0
+   51:         self.last_mouse_y = 0
+   52:         self.zoom = 1.0
+   53:         self.circuit_scroll_x = 0
+   54:         self.circuit_scroll_y = 0
+   55:         self.circuit_drag_mode = None
+   56:         self.circuit_drag_offset = 0
+   57:         self.circuit_geometry = {}
+   58:         self.scope_first_cycle = 0
+   59:         self.scope_first_row = 0
+   60:         self.scope_drag_mode = None
+   61:         self.scope_drag_offset = 0
+   62:         self.scope_geometry = {}
+   63:         self.follow_latest_cycles = True
+   64:         self.dark_mode = False
+   65:         self.colour_blind_mode = False
+   66:         self.last_circuit_bounds = None
+   67:         self.last_scope_bounds = None
+   69:         self.left_margin = 150
+   70:         self.default_cycle_width = 28
+   71:         self.cycle_width = self.default_cycle_width
+   72:         self.row_height = 34
+   73:         self.high_offset = 18
+   74:         self.low_offset = 4
+   75:         self.trace_colours = [
+   76:             (0.20, 0.23, 0.78),
+   77:             (0.16, 0.50, 0.26),
+   78:             (0.70, 0.22, 0.22),
+   79:             (0.57, 0.31, 0.70),
+   80:             (0.10, 0.55, 0.62),
+   81:             (0.72, 0.43, 0.12),
+   82:         ]
+   83:         self.colour_blind_trace_colours = [
+   84:             (0.00, 0.45, 0.70),
+   85:             (0.90, 0.62, 0.00),
+   86:             (0.00, 0.62, 0.45),
+   87:             (0.80, 0.47, 0.65),
+   88:             (0.34, 0.71, 0.91),
+   89:             (0.84, 0.37, 0.00),
+   90:             (0.94, 0.89, 0.26),
+   91:         ]
+   97:     def reset_view(self):
+   98:         """Reset pan, zoom, and oscilloscope scroll to their defaults."""
+   99:         self.pan_x = 0
+  100:         self.pan_y = 0
+  101:         self.zoom = 1.0
+  102:         self.circuit_scroll_x = 0
+  103:         self.circuit_scroll_y = 0
+  104:         self.circuit_drag_mode = None
+  105:         self.scope_first_cycle = 0
+  106:         self.scope_first_row = 0
+  107:         self.scope_drag_mode = None
+  108:         self.follow_latest_cycles = False
+  109:         self.init = False
+  110:         self.Refresh()
+  111: 
+  112:     def set_dark_mode(self, enabled):
+  113:         """Apply dark or light drawing colours to the canvas."""
+  114:         self.dark_mode = enabled
+  115:         self.init = False
+  116:         self.Refresh()
+  117: 
+  118:     def set_colour_blind_mode(self, enabled):
+  119:         """Apply colour-blind-safe signal colours to the canvas."""
+  120:         self.colour_blind_mode = enabled
+  121:         self.Refresh()
+  122: 
+  123:     def theme_colour(self, key):
+  124:         """Return an OpenGL colour from the current canvas theme."""
+  125:         light_colours = {
+  126:             "canvas_bg": (0.96, 0.97, 0.98),
+  127:             "grid": (0.90, 0.92, 0.94),
+  128:             "text": (0.02, 0.03, 0.04),
+  129:             "subtle_text": (0.34, 0.39, 0.47),
+  130:             "circuit_bg": (0.98, 0.98, 0.95),
+  131:             "circuit_border": (0.70, 0.70, 0.62),
+  132:             "device_border": (0.38, 0.42, 0.48),
+  133:             "switch_fill": (1.00, 0.96, 0.76),
+  134:             "clock_fill": (0.80, 0.94, 0.82),
+  135:             "dtype_fill": (0.83, 0.91, 1.00),
+  136:             "gate_fill": (0.95, 0.95, 1.00),
+  137:             "scope_bg": (0.78, 0.78, 0.78),
+  138:             "scope_border": (0.36, 0.36, 0.38),
+  139:             "scope_header": (0.70, 0.80, 0.91),
+  140:             "scope_header_border": (0.48, 0.48, 0.52),
+  141:             "scope_icon": (0.82, 0.90, 0.98),
+  142:             "scope_icon_border": (0.35, 0.48, 0.64),
+  143:             "grid_major": (0.70, 0.70, 0.74),
+  144:             "grid_minor": (0.86, 0.86, 0.88),
+  145:             "grid_row": (0.90, 0.90, 0.91),
+  146:             "level_mark": (0.82, 0.82, 0.84),
+  147:             "level_guide": (0.92, 0.92, 0.93),
+  148:             "scrollbar_track": (0.88, 0.88, 0.88),
+  149:             "scrollbar_step": (0.86, 0.86, 0.86),
+  150:             "scrollbar_border": (0.62, 0.62, 0.64),
+  151:             "scrollbar_thumb": (0.72, 0.72, 0.74),
+  152:             "scrollbar_arrow": (0.26, 0.26, 0.28),
+  153:             "axis": (0.22, 0.22, 0.24),
+  154:             "blank_signal": (0.70, 0.70, 0.70),
+  155:             "pin_border": (0.24, 0.24, 0.24),
+  156:         }
+  157:         dark_colours = {
+  158:             "canvas_bg": (0.08, 0.10, 0.13),
+  159:             "grid": (0.16, 0.19, 0.24),
+  160:             "text": (0.90, 0.93, 0.96),
+  161:             "subtle_text": (0.66, 0.72, 0.80),
+  162:             "circuit_bg": (0.13, 0.15, 0.18),
+  163:             "circuit_border": (0.34, 0.39, 0.46),
+  164:             "device_border": (0.55, 0.61, 0.70),
+  165:             "switch_fill": (0.30, 0.27, 0.12),
+  166:             "clock_fill": (0.12, 0.27, 0.18),
+  167:             "dtype_fill": (0.13, 0.22, 0.34),
+  168:             "gate_fill": (0.19, 0.20, 0.29),
+  169:             "scope_bg": (0.16, 0.18, 0.21),
+  170:             "scope_border": (0.43, 0.48, 0.56),
+  171:             "scope_header": (0.18, 0.28, 0.39),
+  172:             "scope_header_border": (0.42, 0.51, 0.62),
+  173:             "scope_icon": (0.20, 0.31, 0.43),
+  174:             "scope_icon_border": (0.55, 0.67, 0.82),
+  175:             "grid_major": (0.35, 0.40, 0.48),
+  176:             "grid_minor": (0.25, 0.29, 0.35),
+  177:             "grid_row": (0.23, 0.27, 0.32),
+  178:             "level_mark": (0.44, 0.49, 0.57),
+  179:             "level_guide": (0.28, 0.32, 0.38),
+  180:             "scrollbar_track": (0.24, 0.27, 0.32),
+  181:             "scrollbar_step": (0.20, 0.23, 0.28),
+  182:             "scrollbar_border": (0.46, 0.51, 0.58),
+  183:             "scrollbar_thumb": (0.46, 0.50, 0.58),
+  184:             "scrollbar_arrow": (0.82, 0.86, 0.90),
+  185:             "axis": (0.86, 0.89, 0.92),
+  186:             "blank_signal": (0.56, 0.60, 0.66),
+  187:             "pin_border": (0.78, 0.82, 0.88),
+  188:         }
+  189:         colours = dark_colours if self.dark_mode else light_colours
+  190:         return colours[key]
+  191: 
+  193:         """Configure the OpenGL projection for the current canvas size."""
+  197:         GL.glClearColor(*self.theme_colour("canvas_bg"), 0.0)
+  207:     def render(self, swap=True):
+  208:         """Draw the circuit overview and oscilloscope-style traces."""
+  214:         size = self.GetClientSize()
+  216:         GL.glLineWidth(1.0)
+  218:         monitor_items = list(self.monitors.monitors_dictionary.items())
+  219:         top_margin = 18
+  220:         scope_y = 20
+  221:         scope_gap = 8
+  222:         min_scope_height = 240
+  223:         desired_circuit_height = self.estimate_circuit_height()
+  224:         max_circuit_height = max(
+  225:             160,
+  226:             size.height - top_margin - scope_y - scope_gap
+  227:             - min_scope_height
+  228:         )
+  229:         circuit_height = min(desired_circuit_height, max_circuit_height)
+  230:         circuit_height = max(160, circuit_height)
+  231:         circuit_bounds = (
+  232:             18, size.height - circuit_height - top_margin,
+  233:             size.width - 36, circuit_height
+  234:         )
+  235:         scope_bounds = (
+  236:             18, scope_y, size.width - 36,
+  237:             circuit_bounds[1] - scope_y - scope_gap
+  238:         )
+  239: 
+  240:         if scope_bounds[3] < min_scope_height:
+  241:             scope_bounds = (
+  242:                 18, scope_y, size.width - 36, min_scope_height
+  243:             )
+  244:             circuit_y = scope_y + min_scope_height + scope_gap
+  245:             circuit_height = max(
+  246:                 120, size.height - circuit_y - top_margin
+  247:             )
+  248:             circuit_bounds = (
+  249:                 18, circuit_y, size.width - 36, circuit_height
+  250:             )
+  252:         self.last_circuit_bounds = circuit_bounds
+  253:         self.draw_canvas_grid(size)
+  254:         self.draw_circuit_overview(circuit_bounds)
+  255:         self.draw_oscilloscope(scope_bounds, monitor_items)
+  256:         self.finish_render(swap)
+  257: 
+  258:     def finish_render(self, swap=True):
+  259:         """Flush drawing commands and optionally swap buffers."""
+  261:         if swap:
+  264:     def save_circuit_image(self, path):
+  265:         """Save the currently displayed circuit overview."""
+  266:         return self.save_region_image(path, self.last_circuit_bounds)
+  267: 
+  268:     def save_scope_image(self, path):
+  269:         """Save the currently displayed oscilloscope."""
+  270:         return self.save_region_image(path, self.last_scope_bounds)
+  271: 
+  272:     def save_region_image(self, path, bounds):
+  273:         """Save part of the canvas as a PNG image or one-page PDF."""
+  274:         self.render(swap=False)
+  275:         try:
+  276:             if bounds is None:
+  277:                 return False
+  278: 
+  279:             x_pos, y_pos, width, height = bounds
+  280:             size = self.GetClientSize()
+  281:             x_pos = x_pos * self.zoom + self.pan_x
+  282:             y_pos = y_pos * self.zoom + self.pan_y
+  283:             width = width * self.zoom
+  284:             height = height * self.zoom
+  285:             x_pos = max(0, int(round(x_pos)))
+  286:             y_pos = max(0, int(round(y_pos)))
+  287:             width = min(int(round(width)), size.width - x_pos)
+  288:             height = min(int(round(height)), size.height - y_pos)
+  289:             if width <= 0 or height <= 0:
+  290:                 return False
+  291: 
+  292:             GL.glReadBuffer(GL.GL_BACK)
+  293:             GL.glPixelStorei(GL.GL_PACK_ALIGNMENT, 1)
+  294:             GL.glFinish()
+  295:             pixels = GL.glReadPixels(
+  296:                 x_pos, y_pos, width, height, GL.GL_RGB, GL.GL_UNSIGNED_BYTE
+  297:             )
+  298:             row_length = width * 3
+  299:             pixel_data = bytes(pixels)
+  300:             image_data = b"".join(
+  301:                 pixel_data[row * row_length:(row + 1) * row_length]
+  302:                 for row in range(height - 1, -1, -1)
+  303:             )
+  304: 
+  305:             if path.lower().endswith(".pdf"):
+  306:                 self.write_image_pdf(path, width, height, image_data)
+  307:                 return True
+  308: 
+  309:             image = wx.Image(width, height)
+  310:             image.SetData(image_data)
+  311:             return image.SaveFile(path, wx.BITMAP_TYPE_PNG)
+  312:         finally:
+  313:             self.SwapBuffers()
+  314: 
+  315:     def write_image_pdf(self, path, image_width, image_height, image_data):
+  316:         """Write RGB image data to a one-page PDF."""
+  317:         if image_width >= image_height:
+  318:             page_width, page_height = 842, 595
+  319:         else:
+  320:             page_width, page_height = 595, 842
+  321: 
+  322:         margin = 36
+  323:         scale = min(
+  324:             (page_width - 2 * margin) / image_width,
+  325:             (page_height - 2 * margin) / image_height,
+  326:         )
+  327:         draw_width = image_width * scale
+  328:         draw_height = image_height * scale
+  329:         draw_x = (page_width - draw_width) / 2
+  330:         draw_y = (page_height - draw_height) / 2
+  331: 
+  332:         compressed_image = zlib.compress(image_data)
+  333:         content = (
+  334:             "q\n"
+  335:             + self.pdf_number(draw_width) + " 0 0 "
+  336:             + self.pdf_number(draw_height) + " "
+  337:             + self.pdf_number(draw_x) + " "
+  338:             + self.pdf_number(draw_y) + " cm\n"
+  339:             + "/Im0 Do\nQ\n"
+  340:         ).encode("ascii")
+  341: 
+  342:         objects = [
+  343:             b"<< /Type /Catalog /Pages 2 0 R >>",
+  344:             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+  345:             (
+  346:                 "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+  347:                 + str(page_width) + " " + str(page_height)
+  348:                 + "] /Resources << /XObject << /Im0 4 0 R >> >> "
+  349:                 + "/Contents 5 0 R >>"
+  350:             ).encode("ascii"),
+  351:             (
+  352:                 "<< /Type /XObject /Subtype /Image /Width "
+  353:                 + str(image_width) + " /Height " + str(image_height)
+  354:                 + " /ColorSpace /DeviceRGB /BitsPerComponent 8 "
+  355:                 + "/Filter /FlateDecode /Length "
+  356:                 + str(len(compressed_image)) + " >>\nstream\n"
+  357:             ).encode("ascii") + compressed_image + b"\nendstream",
+  358:             (
+  359:                 "<< /Length " + str(len(content)) + " >>\nstream\n"
+  360:             ).encode("ascii") + content + b"endstream",
+  361:         ]
+  362: 
+  363:         pdf_data = self.build_pdf(objects)
+  364:         with open(path, "wb") as pdf_file:
+  365:             pdf_file.write(pdf_data)
+  366: 
+  367:     def build_pdf(self, objects):
+  368:         """Build a minimal PDF from encoded object bodies."""
+  369:         pdf_data = b"%PDF-1.4\n"
+  370:         offsets = []
+  371:         for index, body in enumerate(objects, start=1):
+  372:             offsets.append(len(pdf_data))
+  373:             pdf_data += (
+  374:                 str(index).encode("ascii") + b" 0 obj\n"
+  375:                 + body + b"\nendobj\n"
+  376:             )
+  377: 
+  378:         xref_offset = len(pdf_data)
+  379:         pdf_data += (
+  380:             b"xref\n0 " + str(len(objects) + 1).encode("ascii") + b"\n"
+  381:             + b"0000000000 65535 f \n"
+  382:         )
+  383:         for offset in offsets:
+  384:             pdf_data += (
+  385:                 str(offset).zfill(10).encode("ascii") + b" 00000 n \n"
+  386:             )
+  387:         pdf_data += (
+  388:             b"trailer\n<< /Size "
+  389:             + str(len(objects) + 1).encode("ascii")
+  390:             + b" /Root 1 0 R >>\nstartxref\n"
+  391:             + str(xref_offset).encode("ascii") + b"\n%%EOF\n"
+  392:         )
+  393:         return pdf_data
+  394: 
+  395:     def pdf_number(self, value):
+  396:         """Return a compact PDF numeric literal."""
+  397:         return ("%.2f" % value).rstrip("0").rstrip(".")
+  398: 
+  399:     def draw_canvas_grid(self, size):
+  400:         """Draw a faint simulator-style workspace grid."""
+  401:         self.set_colour(*self.theme_colour("grid"))
+  402:         GL.glBegin(GL.GL_LINES)
+  403:         for x_pos in range(0, size.width + 1, 24):
+  404:             GL.glVertex2f(x_pos, 0)
+  405:             GL.glVertex2f(x_pos, size.height)
+  406:         for y_pos in range(0, size.height + 1, 24):
+  407:             GL.glVertex2f(0, y_pos)
+  408:             GL.glVertex2f(size.width, y_pos)
+  409:         GL.glEnd()
+  410: 
+  411:     def draw_circuit_overview(self, bounds):
+  412:         """Draw a compact block diagram of the parsed circuit."""
+  413:         x_pos, y_pos, width, height = bounds
+  414:         self.draw_rectangle(
+  415:             bounds,
+  416:             self.theme_colour("circuit_bg"),
+  417:             self.theme_colour("circuit_border"),
+  418:         )
+  419:         self.render_text("Circuit overview", x_pos + 10, y_pos + height - 20)
+  420: 
+  421:         view_bounds = (x_pos + 10, y_pos + 26, width - 32, height - 64)
+  422:         view_x, view_y, view_width, view_height = view_bounds
+  423:         if view_width <= 0 or view_height <= 0:
+  424:             return
+  425: 
+  426:         content_width, content_height = self.circuit_content_size(
+  427:             view_width, view_height
+  428:         )
+  429:         max_scroll_x = max(content_width - view_width, 0)
+  430:         max_scroll_y = max(content_height - view_height, 0)
+  431:         self.circuit_scroll_x = self.clamp(
+  432:             self.circuit_scroll_x, 0, max_scroll_x
+  433:         )
+  434:         self.circuit_scroll_y = self.clamp(
+  435:             self.circuit_scroll_y, 0, max_scroll_y
+  436:         )
+  437:         content_bounds = (
+  438:             view_x - self.circuit_scroll_x,
+  439:             view_y + view_height - content_height + self.circuit_scroll_y,
+  440:             content_width,
+  441:             content_height,
+  442:         )
+  443:         self.circuit_geometry = {
+  444:             "view": view_bounds,
+  445:             "content_width": content_width,
+  446:             "content_height": content_height,
+  447:             "max_scroll_x": max_scroll_x,
+  448:             "max_scroll_y": max_scroll_y,
+  449:         }
+  450: 
+  451:         self.begin_scissor(view_bounds)
+  452:         positions = self.build_device_positions(content_bounds)
+  453:         self.draw_connections(positions)
+  454: 
+  455:         for device in self.devices.devices_list:
+  456:             if device.device_id in positions:
+  457:                 self.draw_device_node(device, positions[device.device_id])
+  458:         self.end_scissor()
+  459:         self.draw_circuit_scrollbars(view_bounds)
+  460: 
+  461:     def build_device_positions(self, bounds):
+  462:         """Return a simple layered layout for all devices."""
+  463:         x_pos, y_pos, width, height = bounds
+  464:         layers = self.calculate_device_layers()
+  465:         layer_groups = {}
+  466:         for device in self.devices.devices_list:
+  467:             layer = layers.get(device.device_id, 1)
+  468:             layer_groups.setdefault(layer, []).append(device)
+  469: 
+  470:         max_layer = max(layer_groups) if layer_groups else 0
+  471:         positions = {}
+  472:         longest_name = max(
+  473:             len(str(self.devices.names.get_name_string(device.device_id)))
+  474:             for device in self.devices.devices_list
+  475:         )
+  476:         block_width = min(180, max(112, longest_name * 8 + 24))
+  477:         block_height = 34
+  478:         usable_width = max(width - block_width - 90, 1)
+  479:         top_padding = 42
+  480:         bottom_padding = 14
+  481: 
+  482:         for layer, devices_in_layer in layer_groups.items():
+  483:             if max_layer == 0:
+  484:                 node_x = x_pos + width / 2 - block_width / 2
+  485:             else:
+  486:                 node_x = x_pos + 48 + layer * usable_width / max_layer
+  487: 
+  488:             count = len(devices_in_layer)
+  489:             available_height = max(
+  490:                 height - top_padding - bottom_padding - block_height, 1
+  491:             )
+  492:             for index, device in enumerate(devices_in_layer):
+  493:                 if count == 1:
+  494:                     node_y = y_pos + height / 2 - block_height / 2 - 4
+  495:                 else:
+  496:                     gap = available_height / (count - 1)
+  497:                     node_y = (
+  498:                         y_pos + bottom_padding
+  499:                         + (count - 1 - index) * gap
+  500:                     )
+  501:                 positions[device.device_id] = (
+  502:                     node_x, node_y, block_width, block_height
+  503:                 )
+  504: 
+  505:         return positions
+  506: 
+  507:     def circuit_content_size(self, view_width, view_height):
+  508:         """Return virtual circuit dimensions for large diagrams."""
+  509:         layers = self.calculate_device_layers()
+  510:         layer_counts = {}
+  511:         for device in self.devices.devices_list:
+  512:             layer = layers.get(device.device_id, 1)
+  513:             layer_counts[layer] = layer_counts.get(layer, 0) + 1
+  514: 
+  515:         layer_count = max(layer_counts, default=0) + 1
+  516:         max_devices_in_layer = max(layer_counts.values(), default=1)
+  517:         complex_circuit = (
+  518:             len(self.devices.devices_list) > 12
+  519:             or layer_count > 5
+  520:             or max_devices_in_layer > 6
+  521:         )
+  522:         if not complex_circuit:
+  523:             return view_width, view_height
+  524: 
+  525:         longest_name = max(
+  526:             len(str(self.devices.names.get_name_string(device.device_id)))
+  527:             for device in self.devices.devices_list
+  528:         )
+  529:         block_width = min(180, max(112, longest_name * 8 + 24))
+  530:         block_height = 34
+  531:         layer_gap = 118
+  532:         row_gap = 18
+  533: 
+  534:         content_width = (
+  535:             40 + layer_count * block_width
+  536:             + max(0, layer_count - 1) * layer_gap
+  537:         )
+  538:         content_height = (
+  539:             42 + max_devices_in_layer * block_height
+  540:             + max(0, max_devices_in_layer - 1) * row_gap
+  541:         )
+  542:         return max(view_width, content_width), max(view_height, content_height)
+  543: 
+  544:     def draw_circuit_scrollbars(self, view_bounds):
+  545:         """Draw scrollbars for oversized circuit diagrams."""
+  546:         view_x, view_y, view_width, view_height = view_bounds
+  547:         content_width = self.circuit_geometry.get("content_width", view_width)
+  548:         content_height = self.circuit_geometry.get(
+  549:             "content_height", view_height
+  550:         )
+  551:         max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+  552:         max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+  553: 
+  554:         if max_scroll_y > 0:
+  555:             track = (view_x + view_width + 6, view_y, 10, view_height)
+  556:             thumb_height = max(28, view_height * view_height / content_height)
+  557:             usable = max(view_height - thumb_height, 1)
+  558:             fraction = self.circuit_scroll_y / max_scroll_y
+  559:             thumb_y = view_y + (1 - fraction) * usable
+  560:             thumb = (track[0] + 1, thumb_y, 8, thumb_height)
+  561:             self.draw_rectangle(
+  562:                 track,
+  563:                 self.theme_colour("scrollbar_track"),
+  564:                 self.theme_colour("scrollbar_border"),
+  565:             )
+  566:             self.draw_rectangle(
+  567:                 thumb,
+  568:                 self.theme_colour("scrollbar_thumb"),
+  569:                 self.theme_colour("scrollbar_border"),
+  570:             )
+  571:             self.circuit_geometry["vertical_track"] = track
+  572:             self.circuit_geometry["vertical_thumb"] = thumb
+  573:         else:
+  574:             self.circuit_geometry["vertical_track"] = None
+  575:             self.circuit_geometry["vertical_thumb"] = None
+  576: 
+  577:         if max_scroll_x > 0:
+  578:             track = (view_x, view_y - 16, view_width, 11)
+  579:             thumb_width = max(44, view_width * view_width / content_width)
+  580:             usable = max(view_width - thumb_width, 1)
+  581:             fraction = self.circuit_scroll_x / max_scroll_x
+  582:             thumb_x = view_x + fraction * usable
+  583:             thumb = (thumb_x, track[1] + 1, thumb_width, 9)
+  584:             self.draw_rectangle(
+  585:                 track,
+  586:                 self.theme_colour("scrollbar_track"),
+  587:                 self.theme_colour("scrollbar_border"),
+  588:             )
+  589:             self.draw_rectangle(
+  590:                 thumb,
+  591:                 self.theme_colour("scrollbar_thumb"),
+  592:                 self.theme_colour("scrollbar_border"),
+  593:             )
+  594:             self.circuit_geometry["horizontal_track"] = track
+  595:             self.circuit_geometry["horizontal_thumb"] = thumb
+  596:         else:
+  597:             self.circuit_geometry["horizontal_track"] = None
+  598:             self.circuit_geometry["horizontal_thumb"] = None
+  599: 
+  600:     def estimate_circuit_height(self):
+  601:         """Return enough circuit height to avoid stacked device overlap."""
+  602:         layers = self.calculate_device_layers()
+  603:         layer_counts = {}
+  604:         for device in self.devices.devices_list:
+  605:             layer = layers.get(device.device_id, 1)
+  606:             layer_counts[layer] = layer_counts.get(layer, 0) + 1
+  607: 
+  608:         max_devices_in_layer = max(layer_counts.values(), default=1)
+  609:         block_height = 34
+  610:         row_gap = 8
+  611:         vertical_padding = 56
+  612:         return (
+  613:             vertical_padding
+  614:             + max_devices_in_layer * block_height
+  615:             + max(0, max_devices_in_layer - 1) * row_gap
+  616:         )
+  617: 
+  618:     def calculate_device_layers(self):
+  619:         """Group devices by dependency depth for circuit drawing."""
+  620:         layers = {}
+  621:         for device in self.devices.devices_list:
+  622:             if not device.inputs:
+  623:                 layers[device.device_id] = 0
+  624: 
+  625:         for _ in self.devices.devices_list:
+  626:             changed = False
+  627:             for device in self.devices.devices_list:
+  628:                 if device.device_id in layers:
+  629:                     continue
+  630: 
+  631:                 source_layers = []
+  632:                 waiting_for_source = False
+  633:                 for connected_output in device.inputs.values():
+  634:                     if connected_output is None:
+  635:                         continue
+  636:                     source_device_id, _ = connected_output
+  637:                     if source_device_id == device.device_id:
+  638:                         continue
+  639:                     if source_device_id not in layers:
+  640:                         waiting_for_source = True
+  641:                         break
+  642:                     source_layers.append(layers[source_device_id])
+  643: 
+  644:                 if not waiting_for_source and source_layers:
+  645:                     layers[device.device_id] = max(source_layers) + 1
+  646:                     changed = True
+  647: 
+  648:             if not changed:
+  649:                 break
+  650: 
+  651:         for device in self.devices.devices_list:
+  652:             if device.device_id not in layers:
+  653:                 layers[device.device_id] = 1
+  654: 
+  655:         return layers
+  656: 
+  657:     def draw_connections(self, positions):
+  658:         """Draw wires between connected device ports."""
+  659:         for target_device in self.devices.devices_list:
+  660:             if target_device.device_id not in positions:
+  661:                 continue
+  662: 
+  663:             input_ids = self.sorted_port_ids(target_device.inputs)
+  664:             for input_index, input_id in enumerate(input_ids):
+  665:                 connected_output = target_device.inputs[input_id]
+  666:                 if connected_output is None:
+  667:                     continue
+  668: 
+  669:                 source_device_id, output_id = connected_output
+  670:                 if source_device_id not in positions:
+  671:                     continue
+  672: 
+  673:                 source_device = self.devices.get_device(source_device_id)
+  674:                 source_pos = positions[source_device_id]
+  675:                 target_pos = positions[target_device.device_id]
+  676:                 start = self.output_pin(source_pos, source_device, output_id)
+  677:                 end = self.input_pin(target_pos, target_device, input_id)
+  678:                 signal = source_device.outputs.get(output_id)
+  679:                 self.draw_connection_line(start, end, signal, input_index)
+  680: 
+  681:     def draw_connection_line(self, start, end, signal, input_index):
+  682:         """Draw one routed circuit wire."""
+  683:         x_start, y_start = start
+  684:         x_end, y_end = end
+  685:         self.set_signal_colour(signal)
+  686:         GL.glLineWidth(1.4)
+  687:         GL.glBegin(GL.GL_LINE_STRIP)
+  688: 
+  689:         if x_end <= x_start:
+  690:             route_y = max(y_start, y_end) + 28 + 9 * (input_index % 3)
+  691:             GL.glVertex2f(x_start, y_start)
+  692:             GL.glVertex2f(x_start + 18, y_start)
+  693:             GL.glVertex2f(x_start + 18, route_y)
+  694:             GL.glVertex2f(x_end - 18, route_y)
+  695:             GL.glVertex2f(x_end - 18, y_end)
+  696:             GL.glVertex2f(x_end, y_end)
+  697:         else:
+  698:             mid_x = (x_start + x_end) / 2
+  699:             GL.glVertex2f(x_start, y_start)
+  700:             GL.glVertex2f(mid_x, y_start)
+  701:             GL.glVertex2f(mid_x, y_end)
+  702:             GL.glVertex2f(x_end, y_end)
+  703: 
+  704:         GL.glEnd()
+  705:         GL.glLineWidth(1.0)
+  706: 
+  707:     def draw_device_node(self, device, bounds):
+  708:         """Draw one device as a labelled circuit block."""
+  709:         x_pos, y_pos, width, height = bounds
+  710:         kind = self.devices.names.get_name_string(device.device_kind)
+  711:         name = self.devices.names.get_name_string(device.device_id)
+  712:         fill_colour = self.device_fill_colour(device)
+  713: 
+  714:         max_chars = max(6, int(width / 8) - 1)
+  715:         display_name = self.truncate_label(str(name), max_chars)
+  716:         display_kind = self.truncate_label(str(kind), max_chars)
+  717: 
+  718:         self.draw_rectangle(
+  719:             bounds, fill_colour, self.theme_colour("device_border")
+  720:         )
+  721:         self.render_text(display_name, x_pos + 8, y_pos + height - 14)
+  722:         self.render_text(
+  723:             display_kind, x_pos + 8, y_pos + 8,
+  724:             self.theme_colour("subtle_text")
+  725:         )
+  726: 
+  727:         for input_id in self.sorted_port_ids(device.inputs):
+  728:             pin_x, pin_y = self.input_pin(bounds, device, input_id)
+  729:             self.draw_circle(pin_x, pin_y, 3.2, (0.98, 0.98, 0.98))
+  730: 
+  731:         for output_id in self.sorted_port_ids(device.outputs):
+  732:             pin_x, pin_y = self.output_pin(bounds, device, output_id)
+  733:             signal = device.outputs.get(output_id)
+  734:             self.draw_circle(pin_x, pin_y, 5.5, self.signal_colour(signal))
+  735: 
+  736:     def device_fill_colour(self, device):
+  737:         """Return a fill colour for a device type."""
+  738:         if device.device_kind == self.devices.SWITCH:
+  739:             return self.theme_colour("switch_fill")
+  740:         if device.device_kind == self.devices.CLOCK:
+  741:             return self.theme_colour("clock_fill")
+  742:         if device.device_kind == self.devices.D_TYPE:
+  743:             return self.theme_colour("dtype_fill")
+  744:         return self.theme_colour("gate_fill")
+  745: 
+  746:     def input_pin(self, bounds, device, input_id):
+  747:         """Return the position of an input pin."""
+  748:         x_pos, y_pos, _, height = bounds
+  749:         input_ids = self.sorted_port_ids(device.inputs)
+  750:         if input_id not in input_ids:
+  751:             return x_pos, y_pos + height / 2
+  752: 
+  753:         index = input_ids.index(input_id)
+  754:         count = len(input_ids)
+  755:         return x_pos, self.distributed_pin_y(y_pos, height, index, count)
+  756: 
+  757:     def output_pin(self, bounds, device, output_id):
+  758:         """Return the position of an output pin."""
+  759:         x_pos, y_pos, width, height = bounds
+  760:         output_ids = self.sorted_port_ids(device.outputs)
+  761:         if output_id not in output_ids:
+  762:             return x_pos + width, y_pos + height / 2
+  763: 
+  764:         index = output_ids.index(output_id)
+  765:         count = len(output_ids)
+  766:         return (
+  767:             x_pos + width,
+  768:             self.distributed_pin_y(y_pos, height, index, count),
+  769:         )
+  770: 
+  771:     def distributed_pin_y(self, y_pos, height, index, count):
+  772:         """Return a vertically distributed pin y coordinate."""
+  773:         if count <= 1:
+  774:             return y_pos + height / 2
+  775:         usable_height = height - 12
+  776:         return y_pos + height - 6 - index * usable_height / (count - 1)
+  777: 
+  778:     def draw_oscilloscope(self, bounds, monitor_items):
+  779:         """Draw monitor signals in a floating oscilloscope window."""
+  780:         x_pos, y_pos, width, height = bounds
+  781: 
+  782:         margin_x = 12 if width > 520 else 6
+  783:         scope_bounds = (
+  784:             x_pos + margin_x,
+  785:             y_pos + 2,
+  786:             width - 2 * margin_x,
+  787:             height - 4,
+  788:         )
+  789:         self.last_scope_bounds = scope_bounds
+  790:         scope_x, scope_y, scope_width, scope_height = scope_bounds
+  791: 
+  792:         self.draw_rectangle(
+  793:             scope_bounds,
+  794:             self.theme_colour("scope_bg"),
+  795:             self.theme_colour("scope_border"),
+  796:         )
+  797:         self.draw_scope_header(scope_bounds)
+  798: 
+  799:         if not monitor_items:
+  800:             self.render_text(
+  801:                 "No monitor points selected.",
+  802:                 scope_x + 20,
+  803:                 scope_y + scope_height - 78,
+  804:             )
+  805:             return
+  806: 
+  807:         label_width = self.calculate_scope_label_width(monitor_items)
+  808:         title_height = 28
+  809:         control_height = 8
+  810:         axis_height = 84
+  811:         scroll_width = 14
+  812: 
+  813:         plot_x = scope_x + label_width
+  814:         plot_y = scope_y + axis_height
+  815:         plot_width = scope_width - label_width - scroll_width - 20
+  816:         control_y = scope_y + scope_height - title_height - control_height
+  817:         plot_height = control_y - plot_y - 8
+  818: 
+  819:         max_visible_cycles = max(
+  820:             10, int(plot_width // self.default_cycle_width)
+  821:         )
+  822:         max_cycles = self.max_recorded_cycles(monitor_items)
+  823:         if max_cycles == 0:
+  824:             cycle_count = min(10, max_visible_cycles)
+  825:             first_cycle = 0
+  826:             self.scope_first_cycle = 0
+  827:             self.cycle_width = plot_width / max(cycle_count, 1)
+  828: 
+  829:             total_rows = len(monitor_items)
+  830:             visible_rows = min(
+  831:                 total_rows, max(1, int(plot_height // self.row_height))
+  832:             )
+  833:             max_first_row = max(total_rows - visible_rows, 0)
+  834:             self.scope_first_row = self.clamp(
+  835:                 self.scope_first_row, 0, max_first_row
+  836:             )
+  837:             visible_monitor_items = monitor_items[
+  838:                 self.scope_first_row:self.scope_first_row + visible_rows
+  839:             ]
+  840: 
+  841:             self.render_text(
+  842:                 "Press Run to record signal traces.",
+  843:                 scope_x + 20,
+  844:                 scope_y + scope_height - 50,
+  845:                 self.theme_colour("subtle_text"),
+  846:             )
+  847:             self.draw_scope_grid(
+  848:                 plot_x, plot_y, plot_width, plot_height, cycle_count
+  849:             )
+  850:             self.draw_scope_scrollbars(
+  851:                 scope_bounds, plot_x, plot_y, plot_width, plot_height,
+  852:                 first_cycle, cycle_count, cycle_count, self.scope_first_row,
+  853:                 total_rows, visible_rows
+  854:             )
+  855:             self.draw_empty_scope_rows(
+  856:                 scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
+  857:                 cycle_count, self.scope_first_row
+  858:             )
+  859:             self.draw_scope_axis(
+  860:                 plot_x, plot_y, cycle_count, first_cycle, cycle_count
+  861:             )
+  862:             return
+  863: 
+  864:         cycle_count = min(max(max_cycles, 10), max_visible_cycles)
+  865:         max_first_cycle = max(max_cycles - cycle_count, 0)
+  866:         if self.follow_latest_cycles:
+  867:             self.scope_first_cycle = max_first_cycle
+  868:         else:
+  869:             self.scope_first_cycle = self.clamp(
+  870:                 self.scope_first_cycle, 0, max_first_cycle
+  871:             )
+  872:         first_cycle = self.scope_first_cycle
+  873:         self.cycle_width = plot_width / max(cycle_count, 1)
+  874: 
+  875:         total_rows = len(monitor_items)
+  876:         visible_rows = min(
+  877:             total_rows, max(1, int(plot_height // self.row_height))
+  878:         )
+  879:         max_first_row = max(total_rows - visible_rows, 0)
+  880:         self.scope_first_row = self.clamp(
+  881:             self.scope_first_row, 0, max_first_row
+  882:         )
+  883:         visible_monitor_items = monitor_items[
+  884:             self.scope_first_row:self.scope_first_row + visible_rows
+  885:         ]
+  886: 
+  887:         self.draw_scope_grid(
+  888:             plot_x, plot_y, plot_width, plot_height, cycle_count
+  889:         )
+  890:         self.draw_scope_scrollbars(
+  891:             scope_bounds, plot_x, plot_y, plot_width, plot_height,
+  892:             first_cycle, max_cycles, cycle_count, self.scope_first_row,
+  893:             total_rows, visible_rows
+  894:         )
+  895:         self.draw_scope_rows(
+  896:             scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
+  897:             first_cycle, cycle_count, self.scope_first_row
+  898:         )
+  902: 
+  903:     def draw_scope_header(self, bounds):
+  904:         """Draw the oscilloscope title strip."""
+  905:         x_pos, y_pos, width, height = bounds
+  906:         header_bounds = (x_pos, y_pos + height - 28, width, 28)
+  907:         self.draw_rectangle(
+  908:             header_bounds,
+  909:             self.theme_colour("scope_header"),
+  910:             self.theme_colour("scope_header_border"),
+  911:         )
+  912:         self.render_text("Oscilloscope", x_pos + 30, y_pos + height - 18)
+  913:         self.draw_rectangle(
+  914:             (x_pos + 9, y_pos + height - 21, 12, 12),
+  915:             self.theme_colour("scope_icon"),
+  916:             self.theme_colour("scope_icon_border"),
+  917:         )
+  918: 
+  919:     def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
+  920:         """Draw oscilloscope grid lines."""
+  921:         GL.glBegin(GL.GL_LINES)
+  922:         for cycle in range(cycle_count + 1):
+  923:             if cycle % 5 == 0:
+  924:                 self.set_colour(*self.theme_colour("grid_major"))
+  925:             else:
+  926:                 self.set_colour(*self.theme_colour("grid_minor"))
+  927:             x_pos = plot_x + cycle * self.cycle_width
+  928:             GL.glVertex2f(x_pos, plot_y)
+  929:             GL.glVertex2f(x_pos, plot_y + height)
+  930: 
+  931:         for row in range(0, int(height), 24):
+  932:             self.set_colour(*self.theme_colour("grid_row"))
+  933:             GL.glVertex2f(plot_x, plot_y + row)
+  934:             GL.glVertex2f(plot_x + width, plot_y + row)
+  935:         GL.glEnd()
+  936: 
+  937:     def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+  938:                         monitor_items, first_cycle, cycle_count,
+  939:                         first_row):
+  940:         """Draw all monitored signal names and waveforms."""
+  941:         row_gap = min(44, plot_height / max(len(monitor_items), 1))
+  942:         for index, monitor_item in enumerate(monitor_items):
+  943:             (device_id, output_id), signal_list = monitor_item
+  944:             name = self.devices.get_signal_name(device_id, output_id)
+  945:             row_mid = plot_y + plot_height - 18 - index * row_gap
+  946:             row_base = row_mid - self.high_offset / 2
+  947: 
+  948:             colour_index = first_row + index
+  949:             colour = self.trace_colour_for_monitor(
+  950:                 device_id, output_id, colour_index
+  951:             )
+  952:             self.set_colour(*colour)
+  953:             self.render_text(name, label_x + 14, row_mid - 5, colour)
+  957:             visible_signals = signal_list[
+  958:                 first_cycle:first_cycle + cycle_count
+  959:             ]
+  960:             self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
+  961: 
+  968:         self.set_colour(*self.theme_colour("level_mark"))
+  978:                              self.theme_colour("subtle_text"))
+  980:                              self.theme_colour("subtle_text"))
+  983:             self.set_colour(*self.theme_colour("level_guide"))
+  991:     def draw_empty_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+  992:                               monitor_items, cycle_count, first_row):
+  993:         """Draw aligned monitor rows before any signal data is recorded."""
+  994:         row_gap = min(44, plot_height / max(len(monitor_items), 1))
+  995:         blank_signals = [self.devices.BLANK] * cycle_count
+  996:         for index, monitor_item in enumerate(monitor_items):
+  997:             (device_id, output_id), _ = monitor_item
+  998:             name = self.devices.get_signal_name(device_id, output_id)
+  999:             row_mid = plot_y + plot_height - 18 - index * row_gap
+ 1000:             row_base = row_mid - self.high_offset / 2
+ 1001: 
+ 1002:             colour_index = first_row + index
+ 1003:             colour = self.trace_colour_for_monitor(
+ 1004:                 device_id, output_id, colour_index
+ 1005:             )
+ 1006:             self.render_text(name, label_x + 14, row_mid - 5, colour)
+ 1007:             self.draw_signal_level_scale(
+ 1008:                 plot_x, plot_y, plot_height, row_base, row_gap
+ 1009:             )
+ 1010:             self.draw_digital_signal(plot_x, row_base, blank_signals, colour)
+ 1011: 
+ 1012:     def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
+ 1013:         """Draw one digital signal as a continuous square waveform."""
+ 1014:         high_y = row_base + self.high_offset
+ 1015:         low_y = row_base + self.low_offset
+ 1016:         previous_y = None
+ 1017: 
+ 1018:         for index, signal in enumerate(signal_list):
+ 1019:             x_start = plot_x + index * self.cycle_width
+ 1020:             x_end = x_start + self.cycle_width
+ 1021: 
+ 1022:             if signal == self.devices.BLANK:
+ 1023:                 self.draw_blank_signal(x_start, x_end, row_base)
+ 1024:                 previous_y = None
+ 1025:                 continue
+ 1026: 
+ 1027:             current_y = self.signal_y(signal, high_y, low_y)
+ 1028:             if current_y is None:
+ 1029:                 continue
+ 1030: 
+ 1031:             self.set_colour(*colour)
+ 1032:             GL.glLineWidth(2.0)
+ 1033:             GL.glBegin(GL.GL_LINE_STRIP)
+ 1034:             if previous_y is None:
+ 1035:                 GL.glVertex2f(x_start, current_y)
+ 1036:             else:
+ 1037:                 GL.glVertex2f(x_start, previous_y)
+ 1038:                 if previous_y != current_y:
+ 1039:                     GL.glVertex2f(x_start, current_y)
+ 1040:             GL.glVertex2f(x_end, current_y)
+ 1041:             GL.glEnd()
+ 1042:             GL.glLineWidth(1.0)
+ 1043:             previous_y = current_y
+ 1044: 
+ 1045:     def signal_y(self, signal, high_y, low_y):
+ 1046:         """Map a simulator signal level to a stable y position."""
+ 1047:         if signal in [self.devices.HIGH, self.devices.RISING]:
+ 1048:             return high_y
+ 1049:         if signal in [self.devices.LOW, self.devices.FALLING]:
+ 1050:             return low_y
+ 1051:         return None
+ 1052: 
+ 1053:     def trace_colour_for_monitor(self, device_id, output_id, index):
+ 1054:         """Return a trace colour, with clocks highlighted in green."""
+ 1055:         if self.colour_blind_mode:
+ 1056:             colours = self.colour_blind_trace_colours
+ 1057:             return colours[index % len(colours)]
+ 1058: 
+ 1059:         device = self.devices.get_device(device_id)
+ 1060:         if device is not None and device.device_kind == self.devices.CLOCK:
+ 1061:             return (0.20, 0.55, 0.25)
+ 1062:         if output_id == self.devices.QBAR_ID:
+ 1063:             return (0.48, 0.30, 0.68)
+ 1064:         return self.trace_colours[index % len(self.trace_colours)]
+ 1065: 
+ 1066:     def draw_blank_signal(self, x_start, x_end, row_base):
+ 1067:         """Draw a blank signal interval for monitors added mid-run."""
+ 1068:         mid_y = row_base + (self.high_offset + self.low_offset) / 2
+ 1069:         dash_width = 5
+ 1070:         self.set_colour(*self.theme_colour("blank_signal"))
+ 1071:         GL.glBegin(GL.GL_LINES)
+ 1072:         while x_start < x_end:
+ 1073:             GL.glVertex2f(x_start, mid_y)
+ 1074:             GL.glVertex2f(min(x_start + dash_width, x_end), mid_y)
+ 1075:             x_start += dash_width * 2
+ 1076:         GL.glEnd()
+ 1077: 
+ 1078:     def draw_scope_scrollbars(self, bounds, plot_x, plot_y, plot_width,
+ 1079:                               plot_height, first_cycle, max_cycles,
+ 1080:                               cycle_count, first_row, total_rows,
+ 1081:                               visible_rows):
+ 1082:         """Draw oscilloscope scrollbars and save their hit targets."""
+ 1083:         x_pos, y_pos, width, _ = bounds
+ 1084:         right_x = plot_x + plot_width + 6
+ 1085:         self.scope_geometry = {
+ 1086:             "plot": (plot_x, plot_y, plot_width, plot_height),
+ 1087:             "max_first_cycle": max(max_cycles - cycle_count, 0),
+ 1088:             "max_first_row": max(total_rows - visible_rows, 0),
+ 1089:         }
+ 1090: 
+ 1091:         vertical_track = (right_x, plot_y, 10, plot_height)
+ 1092:         self.draw_rectangle(
+ 1093:             vertical_track,
+ 1094:             self.theme_colour("scrollbar_track"),
+ 1095:             self.theme_colour("scrollbar_border"),
+ 1096:         )
+ 1097:         if total_rows > visible_rows:
+ 1098:             thumb_height = max(28, plot_height * visible_rows / total_rows)
+ 1099:             fraction = first_row / max(total_rows - visible_rows, 1)
+ 1100:             thumb_y = plot_y + (1 - fraction) * (plot_height - thumb_height)
+ 1101:         else:
+ 1102:             thumb_height = max(28, plot_height * 0.55)
+ 1103:             thumb_y = plot_y + (plot_height - thumb_height) / 2
+ 1104:         vertical_thumb = (right_x + 1, thumb_y, 8, thumb_height)
+ 1105:         self.draw_rectangle(
+ 1106:             vertical_thumb,
+ 1107:             self.theme_colour("scrollbar_thumb"),
+ 1108:             self.theme_colour("scrollbar_border"),
+ 1109:         )
+ 1110: 
+ 1111:         bar_y = y_pos + 34
+ 1112:         bar_x = plot_x
+ 1113:         bar_width = plot_width
+ 1114:         horizontal_track = (bar_x, bar_y, bar_width, 13)
+ 1115:         self.draw_rectangle(
+ 1116:             horizontal_track,
+ 1117:             self.theme_colour("scrollbar_track"),
+ 1118:             self.theme_colour("scrollbar_border"),
+ 1119:         )
+ 1120:         self.draw_rectangle(
+ 1121:             (bar_x - 12, bar_y, 12, 13),
+ 1122:             self.theme_colour("scrollbar_step"),
+ 1123:             self.theme_colour("scrollbar_border"),
+ 1124:         )
+ 1125:         self.draw_rectangle(
+ 1126:             (bar_x + bar_width, bar_y, 12, 13),
+ 1127:             self.theme_colour("scrollbar_step"),
+ 1128:             self.theme_colour("scrollbar_border"),
+ 1129:         )
+ 1130: 
+ 1131:         if max_cycles > cycle_count:
+ 1132:             fraction = first_cycle / max(max_cycles - cycle_count, 1)
+ 1133:             thumb_width = max(44, bar_width * cycle_count / max_cycles)
+ 1134:             thumb_x = bar_x + fraction * (bar_width - thumb_width)
+ 1135:         else:
+ 1136:             thumb_width = max(44, bar_width * 0.55)
+ 1137:             thumb_x = bar_x + (bar_width - thumb_width) / 2
+ 1138:         horizontal_thumb = (thumb_x, bar_y + 2, thumb_width, 9)
+ 1139:         self.draw_rectangle(
+ 1140:             horizontal_thumb,
+ 1141:             self.theme_colour("scrollbar_thumb"),
+ 1142:             self.theme_colour("scrollbar_border"),
+ 1143:         )
+ 1144:         self.scope_geometry.update({
+ 1145:             "vertical_track": vertical_track,
+ 1146:             "vertical_thumb": vertical_thumb,
+ 1147:             "horizontal_track": horizontal_track,
+ 1148:             "horizontal_thumb": horizontal_thumb,
+ 1149:         })
+ 1150:         self.render_text(
+ 1151:             "<", bar_x - 9, bar_y + 2,
+ 1152:             self.theme_colour("scrollbar_arrow")
+ 1153:         )
+ 1154:         self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
+ 1155:                          self.theme_colour("scrollbar_arrow"))
+ 1156: 
+ 1159:         """Draw cycle tick labels along the bottom of the scope."""
+ 1160:         self.set_colour(*self.theme_colour("axis"))
+ 1161:         GL.glBegin(GL.GL_LINES)
+ 1162:         GL.glVertex2f(plot_x, plot_y)
+ 1163:         GL.glVertex2f(plot_x + cycle_count * self.cycle_width, plot_y)
+ 1164:         GL.glEnd()
+ 1165: 
+ 1166:         for cycle in range(cycle_count + 1):
+ 1167:             if cycle % 5 != 0:
+ 1168:                 continue
+ 1169:             x_pos = plot_x + cycle * self.cycle_width
+ 1170:             GL.glBegin(GL.GL_LINES)
+ 1171:             GL.glVertex2f(x_pos, plot_y)
+ 1172:             GL.glVertex2f(x_pos, plot_y - 6)
+ 1173:             GL.glEnd()
+ 1174:             self.render_text(str(first_cycle + cycle), x_pos - 5, plot_y - 20)
+ 1175: 
+ 1180:             plot_x + 28, plot_y - 76, self.theme_colour("axis")
+ 1183:             "Level", plot_x - 38, plot_y - 76,
+ 1184:             self.theme_colour("subtle_text")
+ 1186: 
+ 1187:     def max_recorded_cycles(self, monitor_items):
+ 1188:         """Return the longest recorded monitor trace."""
+ 1189:         max_cycles = 0
+ 1190:         for _, signal_list in monitor_items:
+ 1191:             max_cycles = max(max_cycles, len(signal_list))
+ 1192:         return max_cycles
+ 1193: 
+ 1194:     def calculate_scope_label_width(self, monitor_items):
+ 1195:         """Return enough left margin to fit monitor labels."""
+ 1196:         longest_name = 0
+ 1197:         for (device_id, output_id), _ in monitor_items:
+ 1198:             monitor_name = self.devices.get_signal_name(device_id, output_id)
+ 1199:             longest_name = max(longest_name, len(str(monitor_name)))
+ 1200:         return max(116, 28 + longest_name * 8)
+ 1201: 
+ 1202:     def sorted_port_ids(self, port_dictionary):
+ 1203:         """Return port IDs ordered by their display names."""
+ 1204:         return sorted(port_dictionary, key=self.port_sort_name)
+ 1205: 
+ 1206:     def port_sort_name(self, port_id):
+ 1207:         """Return a stable display name for sorting port IDs."""
+ 1208:         if port_id is None:
+ 1209:             return ""
+ 1210:         return str(self.devices.names.get_name_string(port_id))
+ 1211: 
+ 1212:     def truncate_label(self, label, max_chars):
+ 1213:         """Return a shortened label that fits compact graphics."""
+ 1214:         if label is None:
+ 1215:             return ""
+ 1216:         label = str(label)
+ 1217:         if len(label) <= max_chars:
+ 1218:             return label
+ 1219:         return label[:max_chars - 1] + "."
+ 1220: 
+ 1221:     def begin_scissor(self, bounds):
+ 1222:         """Clip OpenGL drawing to a canvas-space rectangle."""
+ 1223:         x_pos, y_pos, width, height = bounds
+ 1224:         size = self.GetClientSize()
+ 1225:         x_pos = x_pos * self.zoom + self.pan_x
+ 1226:         y_pos = y_pos * self.zoom + self.pan_y
+ 1227:         width = width * self.zoom
+ 1228:         height = height * self.zoom
+ 1229: 
+ 1230:         x_pos = max(0, int(round(x_pos)))
+ 1231:         y_pos = max(0, int(round(y_pos)))
+ 1232:         width = min(int(round(width)), size.width - x_pos)
+ 1233:         height = min(int(round(height)), size.height - y_pos)
+ 1234:         if width <= 0 or height <= 0:
+ 1235:             return
+ 1236: 
+ 1237:         GL.glEnable(GL.GL_SCISSOR_TEST)
+ 1238:         GL.glScissor(x_pos, y_pos, width, height)
+ 1239: 
+ 1240:     def end_scissor(self):
+ 1241:         """Disable OpenGL clipping."""
+ 1242:         GL.glDisable(GL.GL_SCISSOR_TEST)
+ 1243: 
+ 1244:     def draw_rectangle(self, bounds, fill_colour, border_colour=None):
+ 1245:         """Draw a filled rectangle with an optional border."""
+ 1246:         x_pos, y_pos, width, height = bounds
+ 1247:         self.set_colour(*fill_colour)
+ 1248:         GL.glBegin(GL.GL_QUADS)
+ 1249:         GL.glVertex2f(x_pos, y_pos)
+ 1250:         GL.glVertex2f(x_pos + width, y_pos)
+ 1251:         GL.glVertex2f(x_pos + width, y_pos + height)
+ 1252:         GL.glVertex2f(x_pos, y_pos + height)
+ 1253:         GL.glEnd()
+ 1254: 
+ 1255:         if border_colour is not None:
+ 1256:             self.set_colour(*border_colour)
+ 1257:             GL.glBegin(GL.GL_LINE_LOOP)
+ 1258:             GL.glVertex2f(x_pos, y_pos)
+ 1259:             GL.glVertex2f(x_pos + width, y_pos)
+ 1260:             GL.glVertex2f(x_pos + width, y_pos + height)
+ 1261:             GL.glVertex2f(x_pos, y_pos + height)
+ 1262:             GL.glEnd()
+ 1263: 
+ 1264:     def draw_circle(self, x_pos, y_pos, radius, fill_colour):
+ 1265:         """Draw a filled circular marker."""
+ 1266:         self.set_colour(*fill_colour)
+ 1267:         GL.glBegin(GL.GL_TRIANGLE_FAN)
+ 1268:         GL.glVertex2f(x_pos, y_pos)
+ 1269:         for index in range(25):
+ 1270:             angle = 2 * 3.141592653589793 * index / 24
+ 1271:             GL.glVertex2f(
+ 1272:                 x_pos + radius * math.cos(angle),
+ 1273:                 y_pos + radius * math.sin(angle),
+ 1274:             )
+ 1275:         GL.glEnd()
+ 1276:         self.set_colour(*self.theme_colour("pin_border"))
+ 1277:         GL.glBegin(GL.GL_LINE_LOOP)
+ 1278:         for index in range(24):
+ 1279:             angle = 2 * 3.141592653589793 * index / 24
+ 1280:             GL.glVertex2f(
+ 1281:                 x_pos + radius * math.cos(angle),
+ 1282:                 y_pos + radius * math.sin(angle),
+ 1283:             )
+ 1284:         GL.glEnd()
+ 1285: 
+ 1286:     def set_signal_colour(self, signal):
+ 1287:         """Set colour for circuit wires according to signal level."""
+ 1288:         self.set_colour(*self.signal_colour(signal))
+ 1289: 
+ 1290:     def signal_colour(self, signal):
+ 1291:         """Return colour for a signal level."""
+ 1292:         if self.colour_blind_mode:
+ 1293:             if signal in [self.devices.HIGH, self.devices.RISING]:
+ 1294:                 return (0.00, 0.45, 0.70)
+ 1295:             if signal in [self.devices.LOW, self.devices.FALLING]:
+ 1296:                 return (0.90, 0.62, 0.00)
+ 1297: 
+ 1298:         if signal in [self.devices.HIGH, self.devices.RISING]:
+ 1299:             return (0.86, 0.08, 0.08)
+ 1300:         if signal in [self.devices.LOW, self.devices.FALLING]:
+ 1301:             if self.dark_mode:
+ 1302:                 return (0.78, 0.82, 0.88)
+ 1303:             return (0.28, 0.28, 0.30)
+ 1304:         return (0.70, 0.70, 0.70)
+ 1305: 
+ 1306:     def on_paint(self, event):
+ 1307:         """Handle repaint requests."""
+ 1308:         wx.PaintDC(self)
+ 1309:         self.render()
+ 1312:         """Reconfigure the OpenGL projection after resizing."""
+ 1314:         event.Skip()
+ 1317:         """Handle panning and zooming with the mouse."""
+ 1319:         object_x = (event.GetX() - self.pan_x) / self.zoom
+ 1320:         object_y = (size.height - event.GetY() - self.pan_y) / self.zoom
+ 1322: 
+ 1326:             if self.start_circuit_scroll_drag(object_x, object_y):
+ 1327:                 return
+ 1328:             if self.start_scope_scroll_drag(object_x, object_y):
+ 1329:                 return
+ 1330: 
+ 1331:         if event.Dragging() and self.circuit_drag_mode is not None:
+ 1332:             self.update_circuit_scroll_drag(object_x, object_y)
+ 1333:             self.Refresh()
+ 1334:             return
+ 1335: 
+ 1336:         if event.Dragging() and self.scope_drag_mode is not None:
+ 1337:             self.update_scope_scroll_drag(object_x, object_y)
+ 1338:             self.Refresh()
+ 1339:             return
+ 1340: 
+ 1341:         if event.ButtonUp():
+ 1342:             self.circuit_drag_mode = None
+ 1343:             self.scope_drag_mode = None
+ 1344: 
+ 1351:             self.Refresh()
+ 1352: 
+ 1353:         wheel_rotation = event.GetWheelRotation()
+ 1354:         if wheel_rotation != 0 and self.scroll_circuit_view(
+ 1355:             object_x, object_y, wheel_rotation
+ 1356:         ):
+ 1357:             self.Refresh()
+ 1358:             return
+ 1359: 
+ 1360:         if wheel_rotation != 0 and self.scroll_scope_rows(
+ 1361:             object_x, object_y, wheel_rotation
+ 1362:         ):
+ 1363:             self.Refresh()
+ 1364:             return
+ 1365: 
+ 1366:         if wheel_rotation < 0:
+ 1367:             self.zoom *= 1.0 + (
+ 1368:                 wheel_rotation / (20 * event.GetWheelDelta())
+ 1369:             )
+ 1370:             self.zoom = max(self.zoom, 0.2)
+ 1371:         elif wheel_rotation > 0:
+ 1372:             self.zoom /= 1.0 - (
+ 1373:                 wheel_rotation / (20 * event.GetWheelDelta())
+ 1374:             )
+ 1375:             self.zoom = min(self.zoom, 5.0)
+ 1376: 
+ 1377:         if wheel_rotation != 0:
+ 1378:             self.pan_x -= (self.zoom - old_zoom) * object_x
+ 1379:             self.pan_y -= (self.zoom - old_zoom) * object_y
+ 1381:             self.Refresh()
+ 1383:     def start_circuit_scroll_drag(self, x_pos, y_pos):
+ 1384:         """Start dragging a circuit scrollbar if one was clicked."""
+ 1385:         vertical_track = self.circuit_geometry.get("vertical_track")
+ 1386:         vertical_thumb = self.circuit_geometry.get("vertical_thumb")
+ 1387:         horizontal_track = self.circuit_geometry.get("horizontal_track")
+ 1388:         horizontal_thumb = self.circuit_geometry.get("horizontal_thumb")
+ 1389: 
+ 1390:         if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+ 1391:             self.circuit_drag_mode = "vertical"
+ 1392:             self.circuit_drag_offset = y_pos - vertical_thumb[1]
+ 1393:             return True
+ 1394: 
+ 1395:         if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+ 1396:             self.circuit_drag_mode = "vertical"
+ 1397:             self.circuit_drag_offset = vertical_thumb[3] / 2
+ 1398:             self.update_circuit_scroll_drag(x_pos, y_pos)
+ 1399:             self.Refresh()
+ 1400:             return True
+ 1401: 
+ 1402:         if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+ 1403:             self.circuit_drag_mode = "horizontal"
+ 1404:             self.circuit_drag_offset = x_pos - horizontal_thumb[0]
+ 1405:             return True
+ 1406: 
+ 1407:         if horizontal_thumb and self.point_in_rect(
+ 1408:             x_pos, y_pos, horizontal_track
+ 1409:         ):
+ 1410:             self.circuit_drag_mode = "horizontal"
+ 1411:             self.circuit_drag_offset = horizontal_thumb[2] / 2
+ 1412:             self.update_circuit_scroll_drag(x_pos, y_pos)
+ 1413:             self.Refresh()
+ 1414:             return True
+ 1415: 
+ 1416:         return False
+ 1417: 
+ 1418:     def update_circuit_scroll_drag(self, x_pos, y_pos):
+ 1419:         """Update circuit viewport scroll while a scrollbar is dragged."""
+ 1420:         if self.circuit_drag_mode == "vertical":
+ 1421:             track = self.circuit_geometry.get("vertical_track")
+ 1422:             thumb = self.circuit_geometry.get("vertical_thumb")
+ 1423:             max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+ 1424:             if not track or not thumb or max_scroll_y == 0:
+ 1425:                 return
+ 1426: 
+ 1427:             _, track_y, _, track_height = track
+ 1428:             _, _, _, thumb_height = thumb
+ 1429:             usable = max(track_height - thumb_height, 1)
+ 1430:             thumb_y = self.clamp(
+ 1431:                 y_pos - self.circuit_drag_offset, track_y, track_y + usable
+ 1432:             )
+ 1433:             fraction = 1 - ((thumb_y - track_y) / usable)
+ 1434:             self.circuit_scroll_y = fraction * max_scroll_y
+ 1435: 
+ 1436:         if self.circuit_drag_mode == "horizontal":
+ 1437:             track = self.circuit_geometry.get("horizontal_track")
+ 1438:             thumb = self.circuit_geometry.get("horizontal_thumb")
+ 1439:             max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+ 1440:             if not track or not thumb or max_scroll_x == 0:
+ 1441:                 return
+ 1442: 
+ 1443:             track_x, _, track_width, _ = track
+ 1444:             _, _, thumb_width, _ = thumb
+ 1445:             usable = max(track_width - thumb_width, 1)
+ 1446:             thumb_x = self.clamp(
+ 1447:                 x_pos - self.circuit_drag_offset, track_x, track_x + usable
+ 1448:             )
+ 1449:             fraction = (thumb_x - track_x) / usable
+ 1450:             self.circuit_scroll_x = fraction * max_scroll_x
+ 1451: 
+ 1452:     def scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
+ 1453:         """Scroll the circuit overview when the wheel is over it."""
+ 1454:         view = self.circuit_geometry.get("view")
+ 1455:         if not self.point_in_rect(x_pos, y_pos, view):
+ 1456:             return False
+ 1457: 
+ 1458:         max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
+ 1459:         max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
+ 1460:         if max_scroll_x == 0 and max_scroll_y == 0:
+ 1461:             return False
+ 1462: 
+ 1463:         if wx.GetKeyState(wx.WXK_SHIFT) and max_scroll_x > 0:
+ 1464:             step = -48 if wheel_rotation > 0 else 48
+ 1465:             self.circuit_scroll_x = self.clamp(
+ 1466:                 self.circuit_scroll_x + step, 0, max_scroll_x
+ 1467:             )
+ 1468:             return True
+ 1469: 
+ 1470:         if max_scroll_y > 0:
+ 1471:             step = -48 if wheel_rotation > 0 else 48
+ 1472:             self.circuit_scroll_y = self.clamp(
+ 1473:                 self.circuit_scroll_y + step, 0, max_scroll_y
+ 1474:             )
+ 1475:             return True
+ 1476: 
+ 1477:         if max_scroll_x > 0:
+ 1478:             step = -48 if wheel_rotation > 0 else 48
+ 1479:             self.circuit_scroll_x = self.clamp(
+ 1480:                 self.circuit_scroll_x + step, 0, max_scroll_x
+ 1481:             )
+ 1482:             return True
+ 1483: 
+ 1484:         return False
+ 1485: 
+ 1486:     def start_scope_scroll_drag(self, x_pos, y_pos):
+ 1487:         """Start dragging a scope scrollbar thumb if one was clicked."""
+ 1488:         vertical_track = self.scope_geometry.get("vertical_track")
+ 1489:         vertical_thumb = self.scope_geometry.get("vertical_thumb")
+ 1490:         horizontal_track = self.scope_geometry.get("horizontal_track")
+ 1491:         horizontal_thumb = self.scope_geometry.get("horizontal_thumb")
+ 1492: 
+ 1493:         if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+ 1494:             self.scope_drag_mode = "vertical"
+ 1495:             self.scope_drag_offset = y_pos - vertical_thumb[1]
+ 1496:             return True
+ 1497: 
+ 1498:         if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+ 1499:             self.scope_drag_mode = "vertical"
+ 1500:             self.scope_drag_offset = vertical_thumb[3] / 2
+ 1501:             self.update_scope_scroll_drag(x_pos, y_pos)
+ 1502:             self.Refresh()
+ 1503:             return True
+ 1504: 
+ 1505:         if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+ 1506:             self.scope_drag_mode = "horizontal"
+ 1507:             self.scope_drag_offset = x_pos - horizontal_thumb[0]
+ 1508:             self.follow_latest_cycles = False
+ 1509:             return True
+ 1510: 
+ 1511:         if horizontal_thumb and self.point_in_rect(
+ 1512:             x_pos, y_pos, horizontal_track
+ 1513:         ):
+ 1514:             self.scope_drag_mode = "horizontal"
+ 1515:             self.scope_drag_offset = horizontal_thumb[2] / 2
+ 1516:             self.follow_latest_cycles = False
+ 1517:             self.update_scope_scroll_drag(x_pos, y_pos)
+ 1518:             self.Refresh()
+ 1519:             return True
+ 1520: 
+ 1521:         return False
+ 1522: 
+ 1523:     def update_scope_scroll_drag(self, x_pos, y_pos):
+ 1524:         """Update the visible scope rows or cycles during a scrollbar drag."""
+ 1525:         if self.scope_drag_mode == "vertical":
+ 1526:             track = self.scope_geometry.get("vertical_track")
+ 1527:             thumb = self.scope_geometry.get("vertical_thumb")
+ 1528:             max_first_row = self.scope_geometry.get("max_first_row", 0)
+ 1529:             if not track or not thumb or max_first_row == 0:
+ 1530:                 return
+ 1531: 
+ 1532:             _, track_y, _, track_height = track
+ 1533:             _, _, _, thumb_height = thumb
+ 1534:             usable = max(track_height - thumb_height, 1)
+ 1535:             thumb_y = self.clamp(
+ 1536:                 y_pos - self.scope_drag_offset, track_y, track_y + usable
+ 1537:             )
+ 1538:             fraction = 1 - ((thumb_y - track_y) / usable)
+ 1539:             self.scope_first_row = int(round(fraction * max_first_row))
+ 1540: 
+ 1541:         if self.scope_drag_mode == "horizontal":
+ 1542:             track = self.scope_geometry.get("horizontal_track")
+ 1543:             thumb = self.scope_geometry.get("horizontal_thumb")
+ 1544:             max_first_cycle = self.scope_geometry.get("max_first_cycle", 0)
+ 1545:             self.follow_latest_cycles = False
+ 1546:             if not track or not thumb or max_first_cycle == 0:
+ 1547:                 return
+ 1548: 
+ 1549:             track_x, _, track_width, _ = track
+ 1550:             _, _, thumb_width, _ = thumb
+ 1551:             usable = max(track_width - thumb_width, 1)
+ 1552:             thumb_x = self.clamp(
+ 1553:                 x_pos - self.scope_drag_offset, track_x, track_x + usable
+ 1554:             )
+ 1555:             fraction = (thumb_x - track_x) / usable
+ 1556:             self.scope_first_cycle = int(round(fraction * max_first_cycle))
+ 1557: 
+ 1558:     def scroll_scope_rows(self, x_pos, y_pos, wheel_rotation):
+ 1559:         """Scroll signal rows when the mouse wheel is over the scope."""
+ 1560:         plot = self.scope_geometry.get("plot")
+ 1561:         max_first_row = self.scope_geometry.get("max_first_row", 0)
+ 1562:         if not self.point_in_rect(x_pos, y_pos, plot) or max_first_row == 0:
+ 1563:             return False
+ 1564: 
+ 1565:         step = -1 if wheel_rotation > 0 else 1
+ 1566:         self.scope_first_row = self.clamp(
+ 1567:             self.scope_first_row + step, 0, max_first_row
+ 1568:         )
+ 1569:         return True
+ 1570: 
+ 1571:     def point_in_rect(self, x_pos, y_pos, rect):
+ 1572:         """Return True if a point lies within an OpenGL rectangle."""
+ 1573:         if rect is None:
+ 1574:             return False
+ 1575: 
+ 1576:         rect_x, rect_y, rect_width, rect_height = rect
+ 1577:         return (
+ 1578:             rect_x <= x_pos <= rect_x + rect_width
+ 1579:             and rect_y <= y_pos <= rect_y + rect_height
+ 1580:         )
+ 1581: 
+ 1582:     def clamp(self, value, minimum, maximum):
+ 1583:         """Clamp a number between two bounds."""
+ 1584:         return max(minimum, min(value, maximum))
+ 1585: 
+ 1586:     def render_text(self, text, x_pos, y_pos, colour=None):
+ 1587:         """Draw bitmap text at the given position."""
+ 1588:         if colour is None:
+ 1589:             colour = self.theme_colour("text")
+ 1590:         self.set_colour(*colour)
+ 1594:         for character in str(text):
+ 1595:             if character == "\n":
+ 1601:     def set_colour(self, red, green, blue):
+ 1602:         """Set the OpenGL drawing colour."""
+ 1603:         GL.glColor3f(red, green, blue)
+ 1606: class Gui(wx.Frame):
+ 1607:     """Configure the main GUI window and widgets."""
+ 1609:     def __init__(self, title, path, names, devices, network, monitors):
+ 1610:         """Initialise widgets, controller, and layout."""
+ 1611:         super().__init__(parent=None, title=title, size=(1000, 700))
+ 1612:         self.SetBackgroundColour(wx.Colour(245, 247, 250))
+ 1614:         self.path = path
+ 1615:         self.current_language = "en"
+ 1616:         self.translations = self.build_translations()
+ 1617:         self.dark_mode = False
+ 1618:         self.colour_blind_mode = False
+ 1619:         self.controller = GuiController(names, devices, network, monitors)
+ 1620:         self.default_monitor_keys = []
+ 1621:         self.default_monitor_traces = {}
+ 1622:         self.auto_timer = wx.Timer(self)
+ 1624:         self.configure_menu()
+ 1625:         self.CreateStatusBar()
+ 1627:         self.create_controls()
+ 1628:         self.configure_layout()
+ 1629:         self.bind_events()
+ 1630:         self.apply_theme()
+ 1631:         self.remember_default_monitors()
+ 1632:         self.refresh_choices()
+ 1633:         self.set_status("Loaded " + path)
+ 1634: 
+ 1635:         self.SetSizeHints(760, 520)
+ 1636: 
+ 1637:     def build_translations(self):
+ 1638:         """Return UI label translations keyed by language code."""
+ 1639:         return {
+ 1640:             "en": {
+ 1641:                 "menu_file": "&File",
+ 1642:                 "menu_help": "&Help",
+ 1643:                 "menu_open": "&Open definition file...",
+ 1644:                 "menu_save": "&Save definition as...",
+ 1645:                 "menu_export_circuit": "&Export circuit...",
+ 1646:                 "menu_export_scope": "&Export oscilloscope...",
+ 1647:                 "menu_exit": "&Exit",
+ 1648:                 "menu_help_item": "&Help",
+ 1649:                 "menu_about": "&About",
+ 1650:                 "cycles": "Cycles",
+ 1651:                 "run": "Run",
+ 1652:                 "continue": "Continue",
+ 1653:                 "step": "Step",
+ 1654:                 "auto_run": "Auto Run",
+ 1655:                 "auto_speed": "Auto speed",
+ 1656:                 "open_file": "Open File",
+ 1657:                 "save_file": "Save File",
+ 1658:                 "export_circuit": "Export Circuit",
+ 1659:                 "export_scope": "Export Scope",
+ 1660:                 "language": "Language",
+ 1661:                 "dark_mode": "Dark Mode",
+ 1662:                 "light_mode": "Light Mode",
+ 1663:                 "colour_blind_mode": "Colour Blind",
+ 1664:                 "standard_colours": "Standard Colours",
+ 1665:                 "help": "Help",
+ 1666:                 "switches": "Switches",
+ 1667:                 "monitors": "Monitors",
+ 1668:                 "readings": "Readings",
+ 1669:                 "log": "Log",
+ 1670:                 "switch": "Switch",
+ 1671:                 "value": "Value",
+ 1672:                 "set_switch": "Set Switch",
+ 1673:                 "available_signals": "Available signals",
+ 1674:                 "add_monitor": "Add Monitor",
+ 1675:                 "current_monitors": "Current monitors",
+ 1676:                 "remove_monitor": "Remove Monitor",
+ 1677:                 "reset_view": "Reset View",
+ 1678:                 "status_prefix": "Status",
+ 1679:                 "language_changed": "Language changed.",
+ 1680:                 "dark_mode_enabled": "Dark mode enabled.",
+ 1681:                 "light_mode_enabled": "Light mode enabled.",
+ 1682:                 "colour_blind_enabled": "Colour-blind mode enabled.",
+ 1683:                 "colour_blind_disabled": "Standard colours enabled.",
+ 1684:                 "help_title": "Interface Help",
+ 1685:                 "about_title": "About Logsim",
+ 1686:                 "about_text": (
+ 1687:                     "GF2 Logic Simulator\n"
+ 1688:                     "Graphical interface with circuit overview and "
+ 1689:                     "oscilloscope."
+ 1690:                 ),
+ 1691:                 "help_text": (
+ 1692:                     "Run: cold-starts the circuit and records N cycles.\n"
+ 1693:                     "Continue: records N more cycles without clearing "
+ 1694:                     "traces.\n"
+ 1695:                     "Step: advances by one cycle.\n"
+ 1696:                     "Auto Run: keeps stepping until you stop it.\n"
+ 1697:                     "Set Switch: changes the selected switch to 0 or 1.\n"
+ 1698:                     "Add/Remove Monitor: controls which outputs are shown.\n"
+ 1699:                     "Mouse drag pans the display; mouse wheel zooms it.\n"
+ 1700:                     "Over the oscilloscope, the mouse wheel scrolls signal "
+ 1701:                     "rows.\n"
+ 1702:                     "File > Open loads another definition file."
+ 1703:                 ),
+ 1704:             },
+ 1705:             "fr": {
+ 1706:                 "menu_file": "&Fichier",
+ 1707:                 "menu_help": "&Aide",
+ 1708:                 "menu_open": "&Ouvrir un fichier...",
+ 1709:                 "menu_save": "&Enregistrer sous...",
+ 1710:                 "menu_export_circuit": "&Exporter le circuit...",
+ 1711:                 "menu_export_scope": "&Exporter oscilloscope...",
+ 1712:                 "menu_exit": "&Quitter",
+ 1713:                 "menu_help_item": "&Aide",
+ 1714:                 "menu_about": "&A propos",
+ 1715:                 "cycles": "Cycles",
+ 1716:                 "run": "Lancer",
+ 1717:                 "continue": "Continuer",
+ 1718:                 "step": "Pas",
+ 1719:                 "auto_run": "Auto",
+ 1720:                 "auto_speed": "Vitesse auto",
+ 1721:                 "open_file": "Ouvrir",
+ 1722:                 "save_file": "Enregistrer",
+ 1723:                 "export_circuit": "Exporter circuit",
+ 1724:                 "export_scope": "Exporter scope",
+ 1725:                 "language": "Langue",
+ 1726:                 "dark_mode": "Mode sombre",
+ 1727:                 "light_mode": "Mode clair",
+ 1728:                 "colour_blind_mode": "Daltonien",
+ 1729:                 "standard_colours": "Couleurs standard",
+ 1730:                 "help": "Aide",
+ 1731:                 "switches": "Interrupteurs",
+ 1732:                 "monitors": "Moniteurs",
+ 1733:                 "readings": "Lectures",
+ 1734:                 "log": "Journal",
+ 1735:                 "switch": "Interrupteur",
+ 1736:                 "value": "Valeur",
+ 1737:                 "set_switch": "Regler interrupteur",
+ 1738:                 "available_signals": "Signaux disponibles",
+ 1739:                 "add_monitor": "Ajouter moniteur",
+ 1740:                 "current_monitors": "Moniteurs actuels",
+ 1741:                 "remove_monitor": "Retirer moniteur",
+ 1742:                 "reset_view": "Reinitialiser vue",
+ 1743:                 "status_prefix": "Statut",
+ 1744:                 "language_changed": "Langue modifiee.",
+ 1745:                 "dark_mode_enabled": "Mode sombre active.",
+ 1746:                 "light_mode_enabled": "Mode clair active.",
+ 1747:                 "colour_blind_enabled": "Mode daltonien active.",
+ 1748:                 "colour_blind_disabled": "Couleurs standard activees.",
+ 1749:                 "help_title": "Aide interface",
+ 1750:                 "about_title": "A propos de Logsim",
+ 1751:                 "about_text": (
+ 1752:                     "Simulateur logique GF2\n"
+ 1753:                     "Interface graphique avec circuit et oscilloscope."
+ 1754:                 ),
+ 1755:                 "help_text": (
+ 1756:                     "Lancer: demarre le circuit et enregistre N cycles.\n"
+ 1757:                     "Continuer: ajoute N cycles sans effacer les traces.\n"
+ 1758:                     "Pas: avance d'un cycle.\n"
+ 1759:                     "Auto: avance jusqu'a l'arret.\n"
+ 1760:                     "Regler interrupteur: change un interrupteur a 0 ou 1.\n"
+ 1761:                     "Ajouter/Retirer moniteur: choisit les sorties visibles.\n"
+ 1762:                     "Glisser la souris deplace la vue; la molette zoome.\n"
+ 1763:                     "Sur l'oscilloscope, la molette fait defiler les lignes.\n"
+ 1764:                     "Fichier > Ouvrir charge un autre fichier."
+ 1765:                 ),
+ 1766:             },
+ 1767:             "es": {
+ 1768:                 "menu_file": "&Archivo",
+ 1769:                 "menu_help": "A&yuda",
+ 1770:                 "menu_open": "&Abrir archivo...",
+ 1771:                 "menu_save": "&Guardar como...",
+ 1772:                 "menu_export_circuit": "&Exportar circuito...",
+ 1773:                 "menu_export_scope": "&Exportar osciloscopio...",
+ 1774:                 "menu_exit": "&Salir",
+ 1775:                 "menu_help_item": "A&yuda",
+ 1776:                 "menu_about": "&Acerca de",
+ 1777:                 "cycles": "Ciclos",
+ 1778:                 "run": "Ejecutar",
+ 1779:                 "continue": "Continuar",
+ 1780:                 "step": "Paso",
+ 1781:                 "auto_run": "Auto",
+ 1782:                 "auto_speed": "Velocidad",
+ 1783:                 "open_file": "Abrir",
+ 1784:                 "save_file": "Guardar",
+ 1785:                 "export_circuit": "Exportar circuito",
+ 1786:                 "export_scope": "Exportar scope",
+ 1787:                 "language": "Idioma",
+ 1788:                 "dark_mode": "Modo oscuro",
+ 1789:                 "light_mode": "Modo claro",
+ 1790:                 "colour_blind_mode": "Daltonismo",
+ 1791:                 "standard_colours": "Colores estandar",
+ 1792:                 "help": "Ayuda",
+ 1793:                 "switches": "Interruptores",
+ 1794:                 "monitors": "Monitores",
+ 1795:                 "readings": "Lecturas",
+ 1796:                 "log": "Registro",
+ 1797:                 "switch": "Interruptor",
+ 1798:                 "value": "Valor",
+ 1799:                 "set_switch": "Cambiar interruptor",
+ 1800:                 "available_signals": "Senales disponibles",
+ 1801:                 "add_monitor": "Agregar monitor",
+ 1802:                 "current_monitors": "Monitores actuales",
+ 1803:                 "remove_monitor": "Quitar monitor",
+ 1804:                 "reset_view": "Reiniciar vista",
+ 1805:                 "status_prefix": "Estado",
+ 1806:                 "language_changed": "Idioma cambiado.",
+ 1807:                 "dark_mode_enabled": "Modo oscuro activado.",
+ 1808:                 "light_mode_enabled": "Modo claro activado.",
+ 1809:                 "colour_blind_enabled": "Modo daltonismo activado.",
+ 1810:                 "colour_blind_disabled": "Colores estandar activados.",
+ 1811:                 "help_title": "Ayuda de interfaz",
+ 1812:                 "about_title": "Acerca de Logsim",
+ 1813:                 "about_text": (
+ 1814:                     "Simulador logico GF2\n"
+ 1815:                     "Interfaz grafica con circuito y osciloscopio."
+ 1816:                 ),
+ 1817:                 "help_text": (
+ 1818:                     "Ejecutar: inicia el circuito y graba N ciclos.\n"
+ 1819:                     "Continuar: graba N ciclos mas sin borrar trazas.\n"
+ 1820:                     "Paso: avanza un ciclo.\n"
+ 1821:                     "Auto: avanza hasta que lo detengas.\n"
+ 1822:                     "Cambiar interruptor: pone el interruptor en 0 o 1.\n"
+ 1823:                     "Agregar/Quitar monitor: controla las salidas visibles.\n"
+ 1824:                     "Arrastrar mueve la vista; la rueda hace zoom.\n"
+ 1825:                     "Sobre el osciloscopio, la rueda desplaza senales.\n"
+ 1826:                     "Archivo > Abrir carga otro archivo."
+ 1827:                 ),
+ 1828:             },
+ 1829:             "de": {
+ 1830:                 "menu_file": "&Datei",
+ 1831:                 "menu_help": "&Hilfe",
+ 1832:                 "menu_open": "&Datei offnen...",
+ 1833:                 "menu_save": "&Speichern unter...",
+ 1834:                 "menu_export_circuit": "&Schaltung exportieren...",
+ 1835:                 "menu_export_scope": "&Oszilloskop exportieren...",
+ 1836:                 "menu_exit": "&Beenden",
+ 1837:                 "menu_help_item": "&Hilfe",
+ 1838:                 "menu_about": "&Info",
+ 1839:                 "cycles": "Zyklen",
+ 1840:                 "run": "Start",
+ 1841:                 "continue": "Weiter",
+ 1842:                 "step": "Schritt",
+ 1843:                 "auto_run": "Auto",
+ 1844:                 "auto_speed": "Auto Tempo",
+ 1845:                 "open_file": "Offnen",
+ 1846:                 "save_file": "Speichern",
+ 1847:                 "export_circuit": "Schaltung exportieren",
+ 1848:                 "export_scope": "Scope exportieren",
+ 1849:                 "language": "Sprache",
+ 1850:                 "dark_mode": "Dunkelmodus",
+ 1851:                 "light_mode": "Hellmodus",
+ 1852:                 "colour_blind_mode": "Farbenblind",
+ 1853:                 "standard_colours": "Standardfarben",
+ 1854:                 "help": "Hilfe",
+ 1855:                 "switches": "Schalter",
+ 1856:                 "monitors": "Monitore",
+ 1857:                 "readings": "Werte",
+ 1858:                 "log": "Log",
+ 1859:                 "switch": "Schalter",
+ 1860:                 "value": "Wert",
+ 1861:                 "set_switch": "Schalter setzen",
+ 1862:                 "available_signals": "Verfugbare Signale",
+ 1863:                 "add_monitor": "Monitor hinzufugen",
+ 1864:                 "current_monitors": "Aktuelle Monitore",
+ 1865:                 "remove_monitor": "Monitor entfernen",
+ 1866:                 "reset_view": "Ansicht reset",
+ 1867:                 "status_prefix": "Status",
+ 1868:                 "language_changed": "Sprache geandert.",
+ 1869:                 "dark_mode_enabled": "Dunkelmodus aktiviert.",
+ 1870:                 "light_mode_enabled": "Hellmodus aktiviert.",
+ 1871:                 "colour_blind_enabled": "Farbenblind-Modus aktiviert.",
+ 1872:                 "colour_blind_disabled": "Standardfarben aktiviert.",
+ 1873:                 "help_title": "Hilfe",
+ 1874:                 "about_title": "Info zu Logsim",
+ 1875:                 "about_text": (
+ 1876:                     "GF2 Logiksimulator\n"
+ 1877:                     "Grafische Oberflache mit Schaltung und Oszilloskop."
+ 1878:                 ),
+ 1879:                 "help_text": (
+ 1880:                     "Start: startet die Schaltung und speichert N Zyklen.\n"
+ 1881:                     "Weiter: speichert N weitere Zyklen ohne zu loschen.\n"
+ 1882:                     "Schritt: fuhrt einen Zyklus aus.\n"
+ 1883:                     "Auto: lauft weiter bis zum Stoppen.\n"
+ 1884:                     "Schalter setzen: setzt den Schalter auf 0 oder 1.\n"
+ 1885:                     "Monitor hinzufugen/entfernen: wahlt sichtbare Ausgange.\n"
+ 1886:                     "Mausziehen verschiebt die Ansicht; Mausrad zoomt.\n"
+ 1887:                     "Uber dem Oszilloskop scrollt das Mausrad Signalzeilen.\n"
+ 1888:                     "Datei > Offnen ladt eine andere Datei."
+ 1889:                 ),
+ 1890:             },
+ 1891:         }
+ 1892: 
+ 1893:     def t(self, key):
+ 1894:         """Translate a UI label for the current language."""
+ 1895:         language = self.translations.get(self.current_language, {})
+ 1896:         return language.get(key, self.translations["en"].get(key, key))
+ 1897: 
+ 1898:     def dark_mode_label(self):
+ 1899:         """Return the mode toggle label for the current state."""
+ 1900:         if self.dark_mode:
+ 1901:             return self.t("light_mode")
+ 1902:         return self.t("dark_mode")
+ 1903: 
+ 1904:     def colour_blind_mode_label(self):
+ 1905:         """Return the colour-mode toggle label for the current state."""
+ 1906:         if self.colour_blind_mode:
+ 1907:             return self.t("standard_colours")
+ 1908:         return self.t("colour_blind_mode")
+ 1909: 
+ 1910:     def gui_theme(self):
+ 1911:         """Return wx colours for the current interface theme."""
+ 1912:         if self.dark_mode:
+ 1913:             return {
+ 1914:                 "background": wx.Colour(28, 32, 38),
+ 1915:                 "panel": wx.Colour(34, 39, 46),
+ 1916:                 "control": wx.Colour(43, 49, 58),
+ 1917:                 "text": wx.Colour(231, 235, 240),
+ 1918:                 "muted": wx.Colour(184, 193, 204),
+ 1919:                 "log": wx.Colour(24, 28, 34),
+ 1920:             }
+ 1921:         return {
+ 1922:             "background": wx.Colour(245, 247, 250),
+ 1923:             "panel": wx.Colour(245, 247, 250),
+ 1924:             "control": wx.Colour(255, 255, 255),
+ 1925:             "text": wx.Colour(22, 26, 32),
+ 1926:             "muted": wx.Colour(80, 86, 96),
+ 1927:             "log": wx.Colour(250, 251, 253),
+ 1928:         }
+ 1929: 
+ 1930:     def apply_theme(self):
+ 1931:         """Apply light or dark colours to wx controls and the canvas."""
+ 1932:         theme = self.gui_theme()
+ 1933:         self.SetBackgroundColour(theme["background"])
+ 1934:         self.canvas.set_dark_mode(self.dark_mode)
+ 1935:         self.canvas.set_colour_blind_mode(self.colour_blind_mode)
+ 1936: 
+ 1937:         text_controls = [
+ 1938:             self.cycles_label, self.speed_label, self.switch_label,
+ 1939:             self.add_monitor_label, self.remove_monitor_label,
+ 1940:             self.switch_box, self.monitor_box, self.readings_box,
+ 1941:             self.log_box,
+ 1942:         ]
+ 1943:         buttons = [
+ 1944:             self.run_button, self.continue_button, self.step_button,
+ 1945:             self.auto_run_button, self.open_button, self.save_button,
+ 1946:             self.export_circuit_button, self.export_scope_button,
+ 1947:             self.language_button, self.dark_mode_button,
+ 1948:             self.colour_blind_button, self.help_button, self.set_switch_button,
+ 1949:             self.add_monitor_button, self.remove_monitor_button,
+ 1950:             self.reset_view_button,
+ 1951:         ]
+ 1952:         fields = [
+ 1953:             self.cycles_spin, self.speed_slider, self.switch_choice,
+ 1954:             self.switch_value, self.add_monitor_choice,
+ 1955:             self.remove_monitor_choice, self.readings_list, self.log_text,
+ 1956:         ]
+ 1957: 
+ 1958:         for control in text_controls:
+ 1959:             control.SetForegroundColour(theme["text"])
+ 1960:             control.SetBackgroundColour(theme["background"])
+ 1961: 
+ 1962:         for control in buttons:
+ 1963:             control.SetForegroundColour(theme["text"])
+ 1964:             control.SetBackgroundColour(theme["control"])
+ 1965: 
+ 1966:         for control in fields:
+ 1967:             control.SetForegroundColour(theme["text"])
+ 1968:             control.SetBackgroundColour(theme["control"])
+ 1969: 
+ 1970:         self.log_text.SetBackgroundColour(theme["log"])
+ 1971:         self.dark_mode_button.SetLabel(self.dark_mode_label())
+ 1972:         self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
+ 1973:         self.Refresh()
+ 1974:         self.Layout()
+ 1975: 
+ 1976:     def configure_menu(self):
+ 1977:         """Create the File and Help menus."""
+ 1978:         self.help_menu_id = wx.NewIdRef()
+ 1979:         self.export_circuit_menu_id = wx.NewIdRef()
+ 1980:         self.export_scope_menu_id = wx.NewIdRef()
+ 1981: 
+ 1982:         self.file_menu = wx.Menu()
+ 1983:         self.help_menu = wx.Menu()
+ 1984:         self.menu_bar = wx.MenuBar()
+ 1985:         self.open_menu_item = self.file_menu.Append(
+ 1986:             wx.ID_OPEN, self.t("menu_open")
+ 1987:         )
+ 1988:         self.save_menu_item = self.file_menu.Append(
+ 1989:             wx.ID_SAVEAS, self.t("menu_save")
+ 1990:         )
+ 1991:         self.export_circuit_menu_item = self.file_menu.Append(
+ 1992:             self.export_circuit_menu_id, self.t("menu_export_circuit")
+ 1993:         )
+ 1994:         self.export_scope_menu_item = self.file_menu.Append(
+ 1995:             self.export_scope_menu_id, self.t("menu_export_scope")
+ 1996:         )
+ 1997:         self.file_menu.AppendSeparator()
+ 1998:         self.exit_menu_item = self.file_menu.Append(
+ 1999:             wx.ID_EXIT, self.t("menu_exit")
+ 2000:         )
+ 2001: 
+ 2002:         self.help_menu_item = self.help_menu.Append(
+ 2003:             self.help_menu_id, self.t("menu_help_item")
+ 2004:         )
+ 2005:         self.about_menu_item = self.help_menu.Append(
+ 2006:             wx.ID_ABOUT, self.t("menu_about")
+ 2007:         )
+ 2008: 
+ 2009:         self.menu_bar.Append(self.file_menu, self.t("menu_file"))
+ 2010:         self.menu_bar.Append(self.help_menu, self.t("menu_help"))
+ 2011:         self.SetMenuBar(self.menu_bar)
+ 2012: 
+ 2013:     def create_controls(self):
+ 2014:         """Create all sidebar controls."""
+ 2015:         self.cycles_label = wx.StaticText(self, wx.ID_ANY, self.t("cycles"))
+ 2016:         self.cycles_spin = wx.SpinCtrl(
+ 2017:             self, wx.ID_ANY, min=0, max=100000, initial=10
+ 2018:         )
+ 2019:         self.run_button = wx.Button(self, wx.ID_ANY, self.t("run"))
+ 2020:         self.continue_button = wx.Button(
+ 2021:             self, wx.ID_ANY, self.t("continue")
+ 2022:         )
+ 2023:         self.step_button = wx.Button(self, wx.ID_ANY, self.t("step"))
+ 2024:         self.auto_run_button = wx.ToggleButton(
+ 2025:             self, wx.ID_ANY, self.t("auto_run")
+ 2026:         )
+ 2027:         self.speed_label = wx.StaticText(
+ 2028:             self, wx.ID_ANY, self.t("auto_speed")
+ 2029:         )
+ 2030:         self.speed_slider = wx.Slider(
+ 2031:             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
+ 2032:         )
+ 2033:         self.open_button = wx.Button(self, wx.ID_ANY, self.t("open_file"))
+ 2034:         self.save_button = wx.Button(self, wx.ID_ANY, self.t("save_file"))
+ 2035:         self.export_circuit_button = wx.Button(
+ 2036:             self, wx.ID_ANY, self.t("export_circuit")
+ 2037:         )
+ 2038:         self.export_scope_button = wx.Button(
+ 2039:             self, wx.ID_ANY, self.t("export_scope")
+ 2040:         )
+ 2041:         self.language_button = wx.Button(
+ 2042:             self, wx.ID_ANY, self.t("language")
+ 2043:         )
+ 2044:         self.dark_mode_button = wx.Button(
+ 2045:             self, wx.ID_ANY, self.dark_mode_label()
+ 2046:         )
+ 2047:         self.colour_blind_button = wx.Button(
+ 2048:             self, wx.ID_ANY, self.colour_blind_mode_label()
+ 2049:         )
+ 2050:         self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
+ 2052:         self.log_entries = []
+ 2053:         self.log_text = wx.TextCtrl(
+ 2054:             self,
+ 2055:             wx.ID_ANY,
+ 2056:             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP,
+ 2057:             size=(-1, 72),
+ 2058:         )
+ 2059:         self.log_text.SetFont(
+ 2060:             wx.Font(
+ 2061:                 9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
+ 2062:                 wx.FONTWEIGHT_NORMAL
+ 2063:             )
+ 2064:         )
+ 2065:         self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
+ 2066: 
+ 2067:         self.switch_label = wx.StaticText(self, wx.ID_ANY, self.t("switch"))
+ 2068:         self.switch_choice = wx.Choice(self, wx.ID_ANY)
+ 2069:         self.switch_value = wx.RadioBox(
+ 2070:             self,
+ 2071:             wx.ID_ANY,
+ 2072:             self.t("value"),
+ 2073:             choices=["0", "1"],
+ 2074:             majorDimension=2,
+ 2075:             style=wx.RA_SPECIFY_COLS,
+ 2076:         )
+ 2077:         self.set_switch_button = wx.Button(
+ 2078:             self, wx.ID_ANY, self.t("set_switch")
+ 2079:         )
+ 2080: 
+ 2081:         self.add_monitor_label = wx.StaticText(
+ 2082:             self, wx.ID_ANY, self.t("available_signals")
+ 2083:         )
+ 2084:         self.add_monitor_choice = wx.Choice(self, wx.ID_ANY)
+ 2085:         self.add_monitor_button = wx.Button(
+ 2086:             self, wx.ID_ANY, self.t("add_monitor")
+ 2087:         )
+ 2088: 
+ 2089:         self.remove_monitor_label = wx.StaticText(
+ 2090:             self, wx.ID_ANY, self.t("current_monitors")
+ 2091:         )
+ 2092:         self.remove_monitor_choice = wx.Choice(self, wx.ID_ANY)
+ 2093:         self.remove_monitor_button = wx.Button(
+ 2094:             self, wx.ID_ANY, self.t("remove_monitor")
+ 2095:         )
+ 2096: 
+ 2097:         self.reset_view_button = wx.Button(
+ 2098:             self, wx.ID_ANY, self.t("reset_view")
+ 2099:         )
+ 2100: 
+ 2101:     def configure_layout(self):
+ 2102:         """Arrange canvas and controls in sizers."""
+ 2103:         root_sizer = wx.BoxSizer(wx.VERTICAL)
+ 2104:         toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+ 2106:         display_sizer = wx.BoxSizer(wx.VERTICAL)
+ 2109:         self.switch_box = wx.StaticBox(self, label=self.t("switches"))
+ 2110:         self.monitor_box = wx.StaticBox(self, label=self.t("monitors"))
+ 2111:         self.readings_box = wx.StaticBox(self, label=self.t("readings"))
+ 2112:         self.log_box = wx.StaticBox(self, label=self.t("log"))
+ 2113:         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
+ 2114:         monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
+ 2115:         readings_box = wx.StaticBoxSizer(self.readings_box, wx.VERTICAL)
+ 2116:         log_box = wx.StaticBoxSizer(self.log_box, wx.VERTICAL)
+ 2117: 
+ 2118:         toolbar_sizer.Add(self.cycles_label, 0,
+ 2119:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
+ 2120:         toolbar_sizer.Add(self.cycles_spin, 0,
+ 2121:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+ 2122:         toolbar_sizer.Add(self.run_button, 0,
+ 2123:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+ 2124:         toolbar_sizer.Add(self.continue_button, 0,
+ 2125:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+ 2126:         toolbar_sizer.Add(self.step_button, 0,
+ 2127:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+ 2128:         toolbar_sizer.Add(self.auto_run_button, 0,
+ 2129:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+ 2130:         toolbar_sizer.Add(self.speed_label, 0,
+ 2131:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+ 2132:         toolbar_sizer.Add(self.speed_slider, 1,
+ 2133:                           wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 6)
+ 2134:         toolbar_sizer.AddStretchSpacer()
+ 2135:         toolbar_sizer.Add(self.open_button, 0,
+ 2136:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2137:         toolbar_sizer.Add(self.save_button, 0,
+ 2138:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2139:         toolbar_sizer.Add(self.export_circuit_button, 0,
+ 2140:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2141:         toolbar_sizer.Add(self.export_scope_button, 0,
+ 2142:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2143:         toolbar_sizer.Add(self.language_button, 0,
+ 2144:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2145:         toolbar_sizer.Add(self.dark_mode_button, 0,
+ 2146:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2147:         toolbar_sizer.Add(self.colour_blind_button, 0,
+ 2148:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+ 2149:         toolbar_sizer.Add(self.help_button, 0,
+ 2150:                           wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+ 2151: 
+ 2152:         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
+ 2153:         switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
+ 2154:         switch_box.Add(self.switch_value, 0, wx.EXPAND | wx.ALL, 6)
+ 2155:         switch_box.Add(self.set_switch_button, 0, wx.EXPAND | wx.ALL, 6)
+ 2156: 
+ 2157:         monitor_box.Add(self.add_monitor_label, 0,
+ 2158:                         wx.TOP | wx.LEFT | wx.RIGHT, 6)
+ 2159:         monitor_box.Add(self.add_monitor_choice, 0, wx.EXPAND | wx.ALL, 6)
+ 2160:         monitor_box.Add(self.add_monitor_button, 0, wx.EXPAND | wx.ALL, 6)
+ 2161:         monitor_box.Add(self.remove_monitor_label, 0,
+ 2162:                         wx.TOP | wx.LEFT | wx.RIGHT, 6)
+ 2163:         monitor_box.Add(self.remove_monitor_choice, 0,
+ 2164:                         wx.EXPAND | wx.ALL, 6)
+ 2165:         monitor_box.Add(self.remove_monitor_button, 0,
+ 2166:                         wx.EXPAND | wx.ALL, 6)
+ 2167:         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
+ 2169:         log_box.Add(self.log_text, 1, wx.EXPAND | wx.ALL, 6)
+ 2170: 
+ 2171:         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
+ 2172:         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
+ 2174: 
+ 2175:         display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
+ 2176:         display_sizer.Add(
+ 2177:             log_box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6
+ 2178:         )
+ 2179: 
+ 2180:         main_sizer.Add(display_sizer, 1, wx.EXPAND)
+ 2181:         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
+ 2182:         root_sizer.Add(toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+ 2183:         root_sizer.Add(main_sizer, 1, wx.EXPAND)
+ 2184:         self.SetSizer(root_sizer)
+ 2186:     def bind_events(self):
+ 2187:         """Bind widget events to handlers."""
+ 2188:         self.Bind(wx.EVT_MENU, self.on_menu)
+ 2189:         self.Bind(wx.EVT_TIMER, self.on_auto_timer, self.auto_timer)
+ 2190:         self.Bind(wx.EVT_CLOSE, self.on_close)
+ 2191:         self.run_button.Bind(wx.EVT_BUTTON, self.on_run_button)
+ 2192:         self.continue_button.Bind(wx.EVT_BUTTON, self.on_continue_button)
+ 2193:         self.step_button.Bind(wx.EVT_BUTTON, self.on_step_button)
+ 2194:         self.auto_run_button.Bind(wx.EVT_TOGGLEBUTTON,
+ 2195:                                   self.on_auto_run_button)
+ 2196:         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
+ 2197:         self.open_button.Bind(wx.EVT_BUTTON, lambda event: self.on_open_file())
+ 2198:         self.save_button.Bind(wx.EVT_BUTTON, lambda event: self.on_save_file())
+ 2199:         self.export_circuit_button.Bind(
+ 2200:             wx.EVT_BUTTON, lambda event: self.on_export_circuit()
+ 2201:         )
+ 2202:         self.export_scope_button.Bind(
+ 2203:             wx.EVT_BUTTON, lambda event: self.on_export_scope()
+ 2204:         )
+ 2205:         self.language_button.Bind(
+ 2206:             wx.EVT_BUTTON, lambda event: self.on_language_button()
+ 2207:         )
+ 2208:         self.dark_mode_button.Bind(
+ 2209:             wx.EVT_BUTTON, lambda event: self.on_dark_mode_button()
+ 2210:         )
+ 2211:         self.colour_blind_button.Bind(
+ 2212:             wx.EVT_BUTTON, lambda event: self.on_colour_blind_button()
+ 2213:         )
+ 2214:         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
+ 2215:         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
+ 2216:         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
+ 2217:         self.remove_monitor_button.Bind(
+ 2218:             wx.EVT_BUTTON, self.on_remove_monitor_button
+ 2219:         )
+ 2220:         self.reset_view_button.Bind(wx.EVT_BUTTON, self.on_reset_view_button)
+ 2221: 
+ 2223:         """Handle menu events."""
+ 2224:         event_id = event.GetId()
+ 2225:         if event_id == wx.ID_EXIT:
+ 2226:             self.stop_auto_run()
+ 2228:         elif event_id == wx.ID_OPEN:
+ 2229:             self.on_open_file()
+ 2230:         elif event_id == wx.ID_SAVEAS:
+ 2231:             self.on_save_file()
+ 2232:         elif event_id == int(self.export_circuit_menu_id):
+ 2233:             self.on_export_circuit()
+ 2234:         elif event_id == int(self.export_scope_menu_id):
+ 2235:             self.on_export_scope()
+ 2236:         elif event_id == int(self.help_menu_id):
+ 2237:             self.on_help()
+ 2238:         elif event_id == wx.ID_ABOUT:
+ 2239:             self.on_about()
+ 2240: 
+ 2241:     def on_language_button(self):
+ 2242:         """Show the language selection menu."""
+ 2243:         language_menu = wx.Menu()
+ 2244:         language_names = [
+ 2245:             ("en", "English"),
+ 2246:             ("fr", "Francais"),
+ 2247:             ("es", "Espanol"),
+ 2248:             ("de", "Deutsch"),
+ 2249:         ]
+ 2250: 
+ 2251:         for language_code, language_name in language_names:
+ 2252:             item = language_menu.AppendRadioItem(
+ 2253:                 wx.ID_ANY, language_name
+ 2254:             )
+ 2255:             if language_code == self.current_language:
+ 2256:                 item.Check(True)
+ 2257:             self.Bind(
+ 2258:                 wx.EVT_MENU,
+ 2259:                 lambda event, code=language_code: self.set_language(code),
+ 2260:                 id=item.GetId(),
+ 2261:             )
+ 2262: 
+ 2263:         self.language_button.PopupMenu(language_menu)
+ 2264:         language_menu.Destroy()
+ 2265: 
+ 2266:     def set_language(self, language_code):
+ 2267:         """Switch visible GUI labels to the selected language."""
+ 2268:         if language_code not in self.translations:
+ 2269:             return
+ 2270: 
+ 2271:         self.current_language = language_code
+ 2272:         self.update_language_labels()
+ 2273:         self.set_status(self.t("language_changed"))
+ 2274: 
+ 2275:     def on_dark_mode_button(self):
+ 2276:         """Toggle between light and dark interface themes."""
+ 2277:         self.dark_mode = not self.dark_mode
+ 2278:         self.apply_theme()
+ 2279:         if self.dark_mode:
+ 2280:             self.set_status(self.t("dark_mode_enabled"))
+ 2281:         else:
+ 2282:             self.set_status(self.t("light_mode_enabled"))
+ 2283: 
+ 2284:     def on_colour_blind_button(self):
+ 2285:         """Toggle colour-blind-safe signal colours."""
+ 2286:         self.colour_blind_mode = not self.colour_blind_mode
+ 2287:         self.apply_theme()
+ 2288:         if self.colour_blind_mode:
+ 2289:             self.set_status(self.t("colour_blind_enabled"))
+ 2290:         else:
+ 2291:             self.set_status(self.t("colour_blind_disabled"))
+ 2292: 
+ 2293:     def update_language_labels(self):
+ 2294:         """Apply the current language to visible menus and controls."""
+ 2295:         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
+ 2296:         self.menu_bar.SetMenuLabel(1, self.t("menu_help"))
+ 2297:         self.open_menu_item.SetItemLabel(self.t("menu_open"))
+ 2298:         self.save_menu_item.SetItemLabel(self.t("menu_save"))
+ 2299:         self.export_circuit_menu_item.SetItemLabel(
+ 2300:             self.t("menu_export_circuit")
+ 2301:         )
+ 2302:         self.export_scope_menu_item.SetItemLabel(
+ 2303:             self.t("menu_export_scope")
+ 2304:         )
+ 2305:         self.exit_menu_item.SetItemLabel(self.t("menu_exit"))
+ 2306:         self.help_menu_item.SetItemLabel(self.t("menu_help_item"))
+ 2307:         self.about_menu_item.SetItemLabel(self.t("menu_about"))
+ 2308: 
+ 2309:         self.cycles_label.SetLabel(self.t("cycles"))
+ 2310:         self.run_button.SetLabel(self.t("run"))
+ 2311:         self.continue_button.SetLabel(self.t("continue"))
+ 2312:         self.step_button.SetLabel(self.t("step"))
+ 2313:         self.auto_run_button.SetLabel(self.t("auto_run"))
+ 2314:         self.speed_label.SetLabel(self.t("auto_speed"))
+ 2315:         self.open_button.SetLabel(self.t("open_file"))
+ 2316:         self.save_button.SetLabel(self.t("save_file"))
+ 2317:         self.export_circuit_button.SetLabel(self.t("export_circuit"))
+ 2318:         self.export_scope_button.SetLabel(self.t("export_scope"))
+ 2319:         self.language_button.SetLabel(self.t("language"))
+ 2320:         self.dark_mode_button.SetLabel(self.dark_mode_label())
+ 2321:         self.colour_blind_button.SetLabel(self.colour_blind_mode_label())
+ 2322:         self.help_button.SetLabel(self.t("help"))
+ 2323: 
+ 2324:         self.switch_box.SetLabel(self.t("switches"))
+ 2325:         self.monitor_box.SetLabel(self.t("monitors"))
+ 2326:         self.readings_box.SetLabel(self.t("readings"))
+ 2327:         self.log_box.SetLabel(self.t("log"))
+ 2328:         self.switch_label.SetLabel(self.t("switch"))
+ 2329:         self.switch_value.SetLabel(self.t("value"))
+ 2330:         self.set_switch_button.SetLabel(self.t("set_switch"))
+ 2331:         self.add_monitor_label.SetLabel(self.t("available_signals"))
+ 2332:         self.add_monitor_button.SetLabel(self.t("add_monitor"))
+ 2333:         self.remove_monitor_label.SetLabel(self.t("current_monitors"))
+ 2334:         self.remove_monitor_button.SetLabel(self.t("remove_monitor"))
+ 2335:         self.reset_view_button.SetLabel(self.t("reset_view"))
+ 2336:         self.apply_theme()
+ 2337:         self.Layout()
+ 2338: 
+ 2339:     def on_close(self, event):
+ 2340:         """Stop background timers before closing the window."""
+ 2341:         self.stop_auto_run()
+ 2342:         event.Skip()
+ 2345:         """Run the simulation from a cold start."""
+ 2346:         self.stop_auto_run()
+ 2347:         self.clear_removed_default_traces()
+ 2348:         self.canvas.follow_latest_cycles = True
+ 2349:         success, message = self.controller.run_from_start(
+ 2350:             self.cycles_spin.GetValue()
+ 2351:         )
+ 2352:         self.after_action(success, message)
+ 2353: 
+ 2354:     def on_continue_button(self, event):
+ 2355:         """Continue a previous simulation."""
+ 2356:         self.stop_auto_run()
+ 2357:         self.canvas.follow_latest_cycles = True
+ 2358:         success, message = self.controller.continue_simulation(
+ 2359:             self.cycles_spin.GetValue()
+ 2360:         )
+ 2361:         self.after_action(success, message)
+ 2362: 
+ 2363:     def on_step_button(self, event):
+ 2364:         """Run exactly one simulation cycle."""
+ 2365:         self.stop_auto_run()
+ 2366:         success, message = self.controller.step_simulation()
+ 2367:         self.after_action(success, message)
+ 2368: 
+ 2369:     def on_auto_run_button(self, event):
+ 2370:         """Start or stop continuous simulation."""
+ 2371:         if self.auto_run_button.GetValue():
+ 2372:             self.canvas.follow_latest_cycles = True
+ 2373:             self.auto_timer.Start(self.get_auto_delay())
+ 2374:             self.set_status("Auto run started.")
+ 2375:         else:
+ 2376:             self.stop_auto_run()
+ 2377:             self.set_status("Auto run stopped.")
+ 2378: 
+ 2379:     def on_auto_timer(self, event):
+ 2380:         """Advance one cycle whenever the auto-run timer fires."""
+ 2381:         success, message = self.controller.step_simulation()
+ 2382:         self.refresh_choices()
+ 2383:         self.canvas.Refresh()
+ 2384:         if success:
+ 2385:             self.set_status(message)
+ 2386:         else:
+ 2387:             self.stop_auto_run()
+ 2388:             self.set_status(message, error=True)
+ 2389: 
+ 2390:     def on_speed_slider(self, event):
+ 2391:         """Update the auto-run timer interval."""
+ 2392:         if self.auto_timer.IsRunning():
+ 2393:             self.auto_timer.Start(self.get_auto_delay())
+ 2394: 
+ 2395:     def get_auto_delay(self):
+ 2396:         """Return timer delay in milliseconds from the speed slider."""
+ 2397:         speed = self.speed_slider.GetValue()
+ 2398:         return max(50, 1050 - speed * 100)
+ 2399: 
+ 2400:     def stop_auto_run(self):
+ 2401:         """Stop continuous running if it is active."""
+ 2402:         if self.auto_timer.IsRunning():
+ 2403:             self.auto_timer.Stop()
+ 2404:         if self.auto_run_button.GetValue():
+ 2405:             self.auto_run_button.SetValue(False)
+ 2406: 
+ 2407:     def on_set_switch_button(self, event):
+ 2408:         """Set the selected switch to the selected value."""
+ 2409:         switch_name = self.get_choice_value(self.switch_choice)
+ 2410:         if switch_name is None:
+ 2411:             self.after_action(False, "No switch selected.")
+ 2412:             return
+ 2413: 
+ 2414:         success, message = self.controller.set_switch(
+ 2415:             switch_name, self.switch_value.GetStringSelection()
+ 2416:         )
+ 2417:         self.after_action(success, message)
+ 2418: 
+ 2419:     def on_add_monitor_button(self, event):
+ 2420:         """Add the selected signal as a monitor."""
+ 2421:         signal_name = self.get_choice_value(self.add_monitor_choice)
+ 2422:         if signal_name is None:
+ 2423:             self.after_action(False, "No available signal selected.")
+ 2424:             return
+ 2425: 
+ 2426:         success, message = self.controller.add_monitor(signal_name)
+ 2427:         self.after_action(success, message)
+ 2428: 
+ 2429:     def on_remove_monitor_button(self, event):
+ 2430:         """Remove the selected monitor."""
+ 2431:         signal_name = self.get_choice_value(self.remove_monitor_choice)
+ 2432:         if signal_name is None:
+ 2433:             self.after_action(False, "No current monitor selected.")
+ 2434:             return
+ 2435: 
+ 2436:         self.archive_default_monitor(signal_name)
+ 2437:         success, message = self.controller.remove_monitor(signal_name)
+ 2438:         self.after_action(success, message)
+ 2439: 
+ 2440:     def on_reset_view_button(self, event):
+ 2441:         """Restore the default monitor view and reset canvas pan and zoom."""
+ 2442:         self.restore_default_monitors()
+ 2443:         self.refresh_choices()
+ 2444:         self.canvas.reset_view()
+ 2445:         self.set_status("View reset.")
+ 2446: 
+ 2447:     def on_open_file(self):
+ 2448:         """Load and parse a new definition file selected by the user."""
+ 2449:         with wx.FileDialog(
+ 2450:             self,
+ 2451:             "Open logic definition file",
+ 2452:             wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+ 2453:             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
+ 2454:         ) as dialog:
+ 2455:             if dialog.ShowModal() == wx.ID_CANCEL:
+ 2456:                 return
+ 2457:             path = dialog.GetPath()
+ 2458: 
+ 2459:         self.load_definition_file(path)
+ 2460: 
+ 2461:     def on_save_file(self):
+ 2462:         """Save a copy of the currently loaded definition file."""
+ 2463:         default_dir = os.path.dirname(self.path)
+ 2464:         default_file = os.path.basename(self.path)
+ 2465: 
+ 2466:         with wx.FileDialog(
+ 2467:             self,
+ 2468:             "Save logic definition file",
+ 2469:             defaultDir=default_dir,
+ 2470:             defaultFile=default_file,
+ 2471:             wildcard="Text files (*.txt)|*.txt|All files (*.*)|*.*",
+ 2472:             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+ 2473:         ) as dialog:
+ 2474:             if dialog.ShowModal() == wx.ID_CANCEL:
+ 2475:                 return
+ 2476:             save_path = dialog.GetPath()
+ 2477: 
+ 2478:         try:
+ 2479:             if os.path.abspath(save_path) != os.path.abspath(self.path):
+ 2480:                 shutil.copyfile(self.path, save_path)
+ 2481:             self.set_status("Saved file to " + save_path)
+ 2482:         except OSError as error:
+ 2483:             wx.MessageBox(
+ 2484:                 "The file could not be saved.\n" + str(error),
+ 2485:                 "File Save Error",
+ 2486:                 wx.OK | wx.ICON_ERROR,
+ 2487:             )
+ 2488:             self.set_status("Could not save file.", error=True)
+ 2489: 
+ 2490:     def on_export_circuit(self):
+ 2491:         """Export the current circuit overview to an image or PDF."""
+ 2492:         default_dir = os.path.dirname(self.path)
+ 2493:         base_name = os.path.splitext(os.path.basename(self.path))[0]
+ 2494:         export_path = self.choose_export_path(
+ 2495:             "Export logic circuit",
+ 2496:             default_dir,
+ 2497:             base_name + "_circuit.png",
+ 2498:         )
+ 2499:         if export_path is None:
+ 2500:             return
+ 2501: 
+ 2502:         try:
+ 2503:             if self.canvas.save_circuit_image(export_path):
+ 2504:                 self.set_status("Exported circuit to " + export_path)
+ 2505:             else:
+ 2506:                 self.set_status("Could not export circuit.", error=True)
+ 2507:         except Exception as error:
+ 2508:             wx.MessageBox(
+ 2509:                 "The circuit image could not be exported.\n" + str(error),
+ 2510:                 "Circuit Export Error",
+ 2511:                 wx.OK | wx.ICON_ERROR,
+ 2512:             )
+ 2513:             self.set_status("Could not export circuit.", error=True)
+ 2514: 
+ 2515:     def on_export_scope(self):
+ 2516:         """Export the current oscilloscope view to an image or PDF."""
+ 2517:         default_dir = os.path.dirname(self.path)
+ 2518:         base_name = os.path.splitext(os.path.basename(self.path))[0]
+ 2519:         export_path = self.choose_export_path(
+ 2520:             "Export oscilloscope",
+ 2521:             default_dir,
+ 2522:             base_name + "_oscilloscope.png",
+ 2523:         )
+ 2524:         if export_path is None:
+ 2525:             return
+ 2526: 
+ 2527:         try:
+ 2528:             if self.canvas.save_scope_image(export_path):
+ 2529:                 self.set_status("Exported oscilloscope to " + export_path)
+ 2530:             else:
+ 2531:                 self.set_status("Could not export oscilloscope.", error=True)
+ 2532:         except Exception as error:
+ 2533:             wx.MessageBox(
+ 2534:                 "The oscilloscope image could not be exported.\n"
+ 2535:                 + str(error),
+ 2536:                 "Oscilloscope Export Error",
+ 2537:                 wx.OK | wx.ICON_ERROR,
+ 2538:             )
+ 2539:             self.set_status("Could not export oscilloscope.", error=True)
+ 2540: 
+ 2541:     def choose_export_path(self, title, default_dir, default_file):
+ 2542:         """Return a PNG or PDF path selected by the user."""
+ 2543:         with wx.FileDialog(
+ 2544:             self,
+ 2545:             title,
+ 2546:             defaultDir=default_dir,
+ 2547:             defaultFile=default_file,
+ 2548:             wildcard="PNG image (*.png)|*.png|PDF document (*.pdf)|*.pdf",
+ 2549:             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
+ 2550:         ) as dialog:
+ 2551:             if dialog.ShowModal() == wx.ID_CANCEL:
+ 2552:                 return None
+ 2553:             export_path = dialog.GetPath()
+ 2554:             filter_index = dialog.GetFilterIndex()
+ 2555: 
+ 2556:         _, extension = os.path.splitext(export_path)
+ 2557:         extension = extension.lower()
+ 2558:         if extension not in [".png", ".pdf"]:
+ 2559:             if filter_index == 1:
+ 2560:                 export_path += ".pdf"
+ 2561:             else:
+ 2562:                 export_path += ".png"
+ 2563: 
+ 2564:         return export_path
+ 2565: 
+ 2566:     def load_definition_file(self, path):
+ 2567:         """Replace the current simulator state with a parsed file."""
+ 2568:         self.stop_auto_run()
+ 2569:         names = Names()
+ 2570:         devices = Devices(names)
+ 2571:         network = Network(names, devices)
+ 2572:         monitors = Monitors(names, devices, network)
+ 2573:         scanner = Scanner(path, names)
+ 2574:         parser = Parser(names, devices, network, monitors, scanner)
+ 2575: 
+ 2576:         if not parser.parse_network():
+ 2577:             wx.MessageBox(
+ 2578:                 "The selected definition file could not be parsed.\n"
+ 2579:                 "Check the terminal for syntax or semantic errors.",
+ 2580:                 "File Load Error",
+ 2581:                 wx.OK | wx.ICON_ERROR,
+ 2582:             )
+ 2583:             return
+ 2584: 
+ 2585:         self.path = path
+ 2586:         self.controller = GuiController(names, devices, network, monitors)
+ 2587:         self.canvas.devices = devices
+ 2588:         self.canvas.monitors = monitors
+ 2589:         self.canvas.reset_view()
+ 2590:         self.remember_default_monitors()
+ 2591:         self.refresh_choices()
+ 2592:         self.set_status("Loaded " + path)
+ 2593: 
+ 2594:     def on_help(self):
+ 2595:         """Display a concise user guide."""
+ 2596:         wx.MessageBox(
+ 2597:             self.t("help_text"),
+ 2598:             self.t("help_title"),
+ 2599:             wx.OK | wx.ICON_INFORMATION,
+ 2600:         )
+ 2601: 
+ 2602:     def on_about(self):
+ 2603:         """Display application information."""
+ 2604:         wx.MessageBox(
+ 2605:             self.t("about_text"),
+ 2606:             self.t("about_title"),
+ 2607:             wx.OK | wx.ICON_INFORMATION,
+ 2608:         )
+ 2609: 
+ 2610:     def after_action(self, success, message):
+ 2611:         """Refresh state after a user action."""
+ 2612:         self.refresh_choices()
+ 2613:         self.canvas.Refresh()
+ 2614:         self.set_status(message, error=not success)
+ 2615: 
+ 2616:     def refresh_choices(self):
+ 2618:         self.populate_choice(
+ 2619:             self.switch_choice, self.controller.list_switches()
+ 2620:         )
+ 2621:         self.populate_choice(
+ 2622:             self.add_monitor_choice,
+ 2623:             self.controller.list_unmonitored_signals(),
+ 2624:         )
+ 2625:         self.populate_choice(
+ 2626:             self.remove_monitor_choice,
+ 2627:             self.controller.list_monitored_signals(),
+ 2628:         )
+ 2637: 
+ 2638:     def populate_choice(self, choice, values):
+ 2639:         """Populate a wx.Choice while preserving selection where possible."""
+ 2640:         old_selection = choice.GetStringSelection()
+ 2641:         choice.Clear()
+ 2642:         if values:
+ 2643:             choice.AppendItems(values)
+ 2644:             if old_selection in values:
+ 2645:                 choice.SetStringSelection(old_selection)
+ 2646:             else:
+ 2647:                 choice.SetSelection(0)
+ 2648: 
+ 2649:     def get_choice_value(self, choice):
+ 2650:         """Return the selected choice string, or None."""
+ 2651:         selection = choice.GetStringSelection()
+ 2652:         if selection == "":
+ 2653:             return None
+ 2654:         return selection
+ 2655: 
+ 2656:     def remember_default_monitors(self):
+ 2657:         """Remember the monitor points that were present when a file loaded."""
+ 2658:         monitor_items = self.controller.monitors.monitors_dictionary.items()
+ 2659:         self.default_monitor_keys = [key for key, _ in monitor_items]
+ 2660:         self.default_monitor_traces = {
+ 2661:             key: list(trace) for key, trace in monitor_items
+ 2662:         }
+ 2663: 
+ 2664:     def archive_default_monitor(self, signal_name):
+ 2665:         """Keep a removable default monitor trace available for Reset View."""
+ 2666:         signal_ids = self.controller.get_existing_signal_ids(signal_name)
+ 2667:         if signal_ids not in self.default_monitor_keys:
+ 2668:             return
+ 2669: 
+ 2670:         traces = self.controller.monitors.monitors_dictionary
+ 2671:         if signal_ids in traces:
+ 2672:             self.default_monitor_traces[signal_ids] = list(traces[signal_ids])
+ 2673: 
+ 2674:     def restore_default_monitors(self):
+ 2675:         """Restore the monitor set that was present when the file loaded."""
+ 2676:         if not self.default_monitor_keys:
+ 2677:             return
+ 2678: 
+ 2679:         traces = self.controller.monitors.monitors_dictionary
+ 2680:         restored_traces = []
+ 2681:         for key in self.default_monitor_keys:
+ 2682:             if key in traces:
+ 2683:                 restored_trace = list(traces[key])
+ 2684:             else:
+ 2685:                 restored_trace = list(self.default_monitor_traces.get(key, []))
+ 2686: 
+ 2687:             if len(restored_trace) < self.controller.cycles_completed:
+ 2688:                 restored_trace.extend(
+ 2689:                     [self.controller.devices.BLANK]
+ 2690:                     * (self.controller.cycles_completed - len(restored_trace))
+ 2691:                 )
+ 2692: 
+ 2693:             restored_traces.append((key, list(restored_trace)))
+ 2694: 
+ 2695:         traces.clear()
+ 2696:         for key, trace in restored_traces:
+ 2697:             traces[key] = trace
+ 2698: 
+ 2699:         self.default_monitor_traces = dict(restored_traces)
+ 2700: 
+ 2701:     def clear_removed_default_traces(self):
+ 2702:         """Clear archived traces for monitors absent before a new run."""
+ 2703:         traces = self.controller.monitors.monitors_dictionary
+ 2704:         for key in self.default_monitor_keys:
+ 2705:             if key not in traces:
+ 2706:                 self.default_monitor_traces[key] = []
+ 2707: 
+ 2708:     def set_status(self, message, error=False):
+ 2709:         """Show a status message to the user."""
+ 2710:         prefix = "Error: " if error else ""
+ 2711:         status_text = (
+ 2712:             prefix + message + "\nCycles completed: "
+ 2713:             + str(self.controller.cycles_completed)
+ 2714:         )
+ 2715:         self.SetStatusText(
+ 2716:             self.t("status_prefix") + ": "
+ 2717:             + status_text.replace("\n", "  |  ")
+ 2718:         )
+ 2719:         self.append_log(prefix + message)
+ 2720: 
+ 2721:     def append_log(self, message):
+ 2722:         """Append one message to the scrolling simulator log."""
+ 2723:         if not hasattr(self, "log_text"):
+ 2724:             return
+ 2725: 
+ 2726:         cycle_text = str(self.controller.cycles_completed)
+ 2727:         self.log_entries.append(
+ 2728:             "[" + cycle_text.rjust(4) + "] " + str(message)
+ 2729:         )
+ 2730:         if len(self.log_entries) > 300:
+ 2731:             self.log_entries = self.log_entries[-300:]
+ 2732: 
+ 2733:         self.log_text.ChangeValue("\n".join(self.log_entries))
+ 2734:         self.log_text.SetInsertionPointEnd()
+ 2735:         self.log_text.ShowPosition(self.log_text.GetLastPosition())
+
+==============================================================================
+logsim/gui_controller.py
+==============================================================================
+    1: """Control logic shared by the graphical user interface.
+    2: 
+    3: This module keeps simulator actions separate from wxPython widgets.  The GUI
+    4: can call these methods directly, and pytest can exercise the same behaviour
+    5: without needing to open a window.
+    6: """
+    7: 
+    8: 
+    9: class GuiController:
+   10:     """Wrap simulator operations needed by the graphical interface."""
+   11: 
+   12:     def __init__(self, names, devices, network, monitors):
+   13:         """Store simulator objects and initialise run state."""
+   14:         self.names = names
+   15:         self.devices = devices
+   16:         self.network = network
+   17:         self.monitors = monitors
+   18:         self.cycles_completed = 0
+   19: 
+   20:     def run_from_start(self, cycles):
+   21:         """Cold-start the network and run for the requested cycles."""
+   22:         cycles = self.validate_cycles(cycles)
+   23:         if cycles is None:
+   24:             return False, "Number of cycles must be zero or greater."
+   25: 
+   26:         self.cycles_completed = 0
+   27:         self.monitors.reset_monitors()
+   28:         self.devices.cold_startup()
+   29: 
+   30:         success, message, cycles_run = self.run_network(cycles)
+   31:         self.cycles_completed += cycles_run
+   32:         if success:
+   33:             return True, "Running for " + str(cycles) + " cycles."
+   34:         return False, message
+   35: 
+   36:     def continue_simulation(self, cycles):
+   37:         """Continue a network that has already been run."""
+   38:         cycles = self.validate_cycles(cycles)
+   39:         if cycles is None:
+   40:             return False, "Number of cycles must be zero or greater."
+   41:         if self.cycles_completed == 0:
+   42:             return False, "Nothing to continue. Run first."
+   43: 
+   44:         success, message, cycles_run = self.run_network(cycles)
+   45:         self.cycles_completed += cycles_run
+   46:         if success:
+   47:             return (
+   48:                 True,
+   49:                 "Continuing for "
+   50:                 + str(cycles)
+   51:                 + " cycles. Total: "
+   52:                 + str(self.cycles_completed)
+   53:                 + "."
+   54:             )
+   55:         return False, message
+   56: 
+   57:     def step_simulation(self):
+   58:         """Run exactly one cycle, cold-starting if necessary."""
+   59:         if self.cycles_completed == 0:
+   60:             return self.run_from_start(1)
+   61: 
+   62:         success, message, cycles_run = self.run_network(1)
+   63:         self.cycles_completed += cycles_run
+   64:         if success:
+   65:             return (
+   66:                 True,
+   67:                 "Advanced one cycle. Total: "
+   68:                 + str(self.cycles_completed)
+   69:                 + "."
+   70:             )
+   71:         return False, message
+   72: 
+   73:     def run_network(self, cycles):
+   74:         """Run the network for a number of cycles.
+   75: 
+   76:         Return a tuple containing success, message, and the number of cycles
+   77:         completed before any error.
+   78:         """
+   79:         cycles_run = 0
+   80:         for _ in range(cycles):
+   81:             if not self.network.execute_network():
+   82:                 return False, "Error! Network oscillating.", cycles_run
+   83:             self.monitors.record_signals()
+   84:             cycles_run += 1
+   85:         return True, "", cycles_run
+   86: 
+   87:     def set_switch(self, switch_name, switch_state):
+   88:         """Set the named switch to 0 or 1."""
+   89:         switch_id = self.names.query(switch_name)
+   90:         if switch_id is None:
+   91:             return False, "Unknown switch: " + switch_name
+   92: 
+   93:         try:
+   94:             switch_state = int(switch_state)
+   95:         except (TypeError, ValueError):
+   96:             return False, "Switch value must be 0 or 1."
+   97: 
+   98:         if switch_state not in [self.devices.LOW, self.devices.HIGH]:
+   99:             return False, "Switch value must be 0 or 1."
+  100: 
+  101:         if self.devices.set_switch(switch_id, switch_state):
+  102:             return (
+  103:                 True,
+  104:                 "Set switch " + switch_name + " to " + str(switch_state)
+  105:                 + "."
+  106:             )
+  107: 
+  108:         return False, switch_name + " is not a switch."
+  109: 
+  110:     def add_monitor(self, signal_name):
+  111:         """Add a monitor point for the selected output signal."""
+  112:         signal_ids = self.get_existing_signal_ids(signal_name)
+  113:         if signal_ids is None:
+  114:             return False, "Unknown signal: " + signal_name
+  115: 
+  116:         device_id, output_id = signal_ids
+  117:         error = self.monitors.make_monitor(
+  118:             device_id, output_id, self.cycles_completed
+  119:         )
+  120: 
+  121:         if error == self.monitors.NO_ERROR:
+  122:             return True, "Added monitor " + signal_name + "."
+  123:         if error == self.monitors.MONITOR_PRESENT:
+  124:             return False, "Monitor already present: " + signal_name
+  125:         if error == self.monitors.NOT_OUTPUT:
+  126:             return False, signal_name + " is not an output signal."
+  127:         if error == self.network.DEVICE_ABSENT:
+  128:             return False, "Unknown device in signal: " + signal_name
+  129:         return False, "Could not add monitor " + signal_name + "."
+  130: 
+  131:     def remove_monitor(self, signal_name):
+  132:         """Remove a monitor point for the selected output signal."""
+  133:         signal_ids = self.get_existing_signal_ids(signal_name)
+  134:         if signal_ids is None:
+  135:             return False, "Unknown signal: " + signal_name
+  136: 
+  137:         device_id, output_id = signal_ids
+  138:         if self.monitors.remove_monitor(device_id, output_id):
+  139:             return True, "Removed monitor " + signal_name + "."
+  140:         return False, "Monitor is not present: " + signal_name
+  141: 
+  142:     def list_switches(self):
+  143:         """Return switch device names in definition order."""
+  144:         switch_names = []
+  145:         for device_id in self.devices.find_devices(self.devices.SWITCH):
+  146:             switch_names.append(self.names.get_name_string(device_id))
+  147:         return switch_names
+  148: 
+  149:     def list_monitored_signals(self):
+  150:         """Return signal names that are currently monitored."""
+  151:         monitored, _ = self.monitors.get_signal_names()
+  152:         return monitored
+  153: 
+  154:     def list_unmonitored_signals(self):
+  155:         """Return output signal names that are not currently monitored."""
+  156:         _, unmonitored = self.monitors.get_signal_names()
+  157:         return unmonitored
+  158: 
+  205:     def get_existing_signal_ids(self, signal_name):
+  206:         """Return IDs for an existing signal name, without adding names."""
+  207:         if not isinstance(signal_name, str) or signal_name == "":
+  208:             return None
+  209: 
+  210:         signal_parts = signal_name.split(".")
+  211:         if len(signal_parts) not in [1, 2]:
+  212:             return None
+  213:         if "" in signal_parts:
+  214:             return None
+  215: 
+  216:         device_id = self.names.query(signal_parts[0])
+  217:         if device_id is None:
+  218:             return None
+  219: 
+  220:         output_id = None
+  221:         if len(signal_parts) == 2:
+  222:             output_id = self.names.query(signal_parts[1])
+  223:             if output_id is None:
+  224:                 return None
+  225: 
+  226:         return device_id, output_id
+  227: 
+  228:     def validate_cycles(self, cycles):
+  229:         """Return a non-negative cycle count, or None if invalid."""
+  230:         try:
+  231:             cycles = int(cycles)
+  232:         except (TypeError, ValueError):
+  233:             return None
+  234: 
+  235:         if cycles < 0:
+  236:             return None
+  237:         return cycles
+
+==============================================================================
+logsim/test_gui.py
+==============================================================================
+    1: """Test GUI canvas helpers without opening a wxPython window."""
+    2: 
+    3: import importlib
+    4: import sys
+    5: import types
+    6: from types import SimpleNamespace
+    7: 
+    8: 
+    9: def install_gui_dependency_stubs():
+   10:     """Install tiny wx/OpenGL stubs for headless GUI helper tests."""
+   11:     wx_module = types.ModuleType("wx")
+   12:     wxcanvas_module = types.ModuleType("wx.glcanvas")
+   13:     opengl_module = types.ModuleType("OpenGL")
+   14:     gl_module = types.ModuleType("OpenGL.GL")
+   15:     glut_module = types.ModuleType("OpenGL.GLUT")
+   16: 
+   17:     class DummyWidget:
+   18:         """Object that accepts any GUI construction call."""
+   19: 
+   20:         def __init__(self, *args, **kwargs):
+   21:             """Ignore GUI constructor arguments."""
+   22: 
+   23:     wx_module.Frame = DummyWidget
+   24:     wx_module.Panel = DummyWidget
+   25:     wx_module.Timer = DummyWidget
+   26:     wx_module.BoxSizer = DummyWidget
+   27:     wx_module.StaticBox = DummyWidget
+   28:     wx_module.StaticBoxSizer = DummyWidget
+   29:     wx_module.Button = DummyWidget
+   30:     wx_module.StaticText = DummyWidget
+   31:     wx_module.SpinCtrl = DummyWidget
+   32:     wx_module.Slider = DummyWidget
+   33:     wx_module.Choice = DummyWidget
+   34:     wx_module.RadioBox = DummyWidget
+   35:     wx_module.ListBox = DummyWidget
+   36:     wx_module.TextCtrl = DummyWidget
+   37:     wx_module.MenuBar = DummyWidget
+   38:     wx_module.Menu = DummyWidget
+   39:     wx_module.FileDialog = DummyWidget
+   40:     wx_module.MessageDialog = DummyWidget
+   41:     wx_module.Colour = lambda *args: args
+   42:     wx_module.GetKeyState = lambda *args: False
+   43:     wx_module.WXK_SHIFT = 0
+   44: 
+   45:     wxcanvas_module.GLCanvas = DummyWidget
+   46:     wxcanvas_module.GLContext = DummyWidget
+   47:     wxcanvas_module.WX_GL_RGBA = 1
+   48:     wxcanvas_module.WX_GL_DOUBLEBUFFER = 2
+   49:     wxcanvas_module.WX_GL_DEPTH_SIZE = 3
+   50: 
+   51:     glut_module.GLUT_BITMAP_HELVETICA_12 = object()
+   52:     glut_module.glutInit = lambda *args, **kwargs: None
+   53:     glut_module.glutBitmapCharacter = lambda *args, **kwargs: None
+   54: 
+   55:     def missing_gl_attribute(_name):
+   56:         """Return a no-op function for any OpenGL symbol."""
+   57:         return lambda *args, **kwargs: None
+   58: 
+   59:     gl_module.__getattr__ = missing_gl_attribute
+   60:     opengl_module.GL = gl_module
+   61:     opengl_module.GLUT = glut_module
+   62: 
+   63:     sys.modules.setdefault("wx", wx_module)
+   64:     sys.modules.setdefault("wx.glcanvas", wxcanvas_module)
+   65:     sys.modules.setdefault("OpenGL", opengl_module)
+   66:     sys.modules.setdefault("OpenGL.GL", gl_module)
+   67:     sys.modules.setdefault("OpenGL.GLUT", glut_module)
+   68: 
+   69: 
+   70: try:
+   71:     gui = importlib.import_module("gui")
+   72: except ModuleNotFoundError as error:
+   73:     if error.name not in {"wx", "OpenGL"}:
+   74:         raise
+   75:     install_gui_dependency_stubs()
+   76:     sys.modules.pop("gui", None)
+   77:     gui = importlib.import_module("gui")
+   78: 
+   79: MyGLCanvas = gui.MyGLCanvas
+   80: 
+   81: 
+   82: class FakeNames:
+   83:     """Minimal name lookup object for canvas layout tests."""
+   84: 
+   85:     def __init__(self, names):
+   86:         """Store display names by device or port ID."""
+   87:         self.names = names
+   88: 
+   89:     def get_name_string(self, name_id):
+   90:         """Return the display string for an ID."""
+   91:         return self.names.get(name_id, str(name_id))
+   92: 
+   93: 
+   94: class FakeDevices:
+   95:     """Small device collection exposing the canvas-facing API."""
+   96: 
+   97:     LOW = 0
+   98:     HIGH = 1
+   99:     BLANK = 2
+  100:     CLOCK = "CLOCK"
+  101:     QBAR_ID = "QBAR"
+  102: 
+  103:     def __init__(self, device_list, names=None):
+  104:         """Store fake devices and display names."""
+  105:         self.devices_list = device_list
+  106:         self._devices = {
+  107:             device.device_id: device for device in self.devices_list
+  108:         }
+  109:         self.names = FakeNames(names or {})
+  110: 
+  111:     def get_signal_name(self, device_id, output_id):
+  112:         """Return a signal name in the same form as the real device API."""
+  113:         device_name = self.names.get_name_string(device_id)
+  114:         if output_id is None:
+  115:             return device_name
+  116:         return device_name + "." + self.names.get_name_string(output_id)
+  117: 
+  118:     def get_device(self, device_id):
+  119:         """Return a fake device by ID."""
+  120:         return self._devices.get(device_id)
+  121: 
+  122: 
+  123: def fake_device(device_id, device_kind="GATE", inputs=None):
+  124:     """Create a minimal fake device object."""
+  125:     return SimpleNamespace(
+  126:         device_id=device_id,
+  127:         device_kind=device_kind,
+  128:         inputs=inputs or {},
+  129:         outputs={None: FakeDevices.LOW},
+  130:     )
+  131: 
+  132: 
+  133: def make_canvas(devices):
+  134:     """Create a MyGLCanvas instance without running wx initialisation."""
+  135:     canvas = MyGLCanvas.__new__(MyGLCanvas)
+  136:     canvas.devices = devices
+  137:     canvas.default_cycle_width = 28
+  138:     canvas.cycle_width = canvas.default_cycle_width
+  139:     canvas.row_height = 34
+  140:     canvas.high_offset = 18
+  141:     canvas.low_offset = 4
+  142:     canvas.scope_first_cycle = 0
+  143:     canvas.scope_first_row = 0
+  144:     canvas.scope_geometry = {}
+  145:     canvas.circuit_scroll_x = 0
+  146:     canvas.circuit_scroll_y = 0
+  147:     canvas.circuit_geometry = {}
+  148:     canvas.dark_mode = False
+  149:     canvas.colour_blind_mode = False
+  150:     canvas.trace_colours = [
+  151:         (0.20, 0.23, 0.78),
+  152:         (0.16, 0.50, 0.26),
+  153:         (0.70, 0.22, 0.22),
+  154:     ]
+  155:     canvas.colour_blind_trace_colours = [
+  156:         (0.00, 0.45, 0.70),
+  157:         (0.90, 0.62, 0.00),
+  158:         (0.00, 0.62, 0.45),
+  159:     ]
+  160:     return canvas
+  161: 
+  162: 
+  163: def test_initial_scope_uses_waveform_layout_before_first_run():
+  164:     """Test if the startup oscilloscope uses the real row layout."""
+  165:     devices = FakeDevices(
+  166:         [fake_device("CLK"), fake_device("DATA"), fake_device("OUT")],
+  167:         {"CLK": "CLK", "DATA": "DATA_SW", "OUT": "FINAL_TEST"},
+  168:     )
+  169:     canvas = make_canvas(devices)
+  170:     monitor_items = [
+  171:         (("CLK", None), []),
+  172:         (("DATA", None), []),
+  173:         (("OUT", None), []),
+  174:     ]
+  175:     calls = {}
+  176:     rendered_text = []
+  177: 
+  178:     canvas.draw_rectangle = lambda *args: None
+  179:     canvas.draw_scope_header = lambda *args: None
+  180:     canvas.render_text = lambda *args: rendered_text.append(args)
+  181:     canvas.draw_scope_grid = lambda *args: calls.setdefault("grid", args)
+  182:     canvas.draw_scope_scrollbars = (
+  183:         lambda *args: calls.setdefault("scrollbars", args)
+  184:     )
+  185:     canvas.draw_empty_scope_rows = (
+  186:         lambda *args: calls.setdefault("empty_rows", args)
+  187:     )
+  188:     canvas.draw_scope_axis = lambda *args: calls.setdefault("axis", args)
+  189: 
+  190:     canvas.draw_oscilloscope((0, 0, 800, 360), monitor_items)
+  191: 
+  192:     assert any("Press Run" in text[0] for text in rendered_text)
+  193:     assert calls["grid"][4] == 10
+  194:     assert calls["scrollbars"][6] == 10
+  195:     assert calls["scrollbars"][7] == 10
+  196:     assert calls["scrollbars"][8] == 0
+  197:     assert calls["scrollbars"][9] == len(monitor_items)
+  198:     assert calls["scrollbars"][10] == len(monitor_items)
+  199:     assert calls["empty_rows"][4] == monitor_items
+  200:     assert calls["empty_rows"][5] == 10
+  201:     assert calls["empty_rows"][6] == 0
+  202:     assert calls["axis"][2:] == (10, 0, 10)
+  203: 
+  204: 
+  205: def test_initial_scope_respects_vertical_scroll_for_many_monitors():
+  206:     """Test if the startup scope only draws visible monitor rows."""
+  207:     devices = FakeDevices(
+  208:         [fake_device(index) for index in range(12)],
+  209:         {index: "SIG_" + str(index) for index in range(12)},
+  210:     )
+  211:     canvas = make_canvas(devices)
+  212:     canvas.scope_first_row = 3
+  213:     monitor_items = [((index, None), []) for index in range(12)]
+  214:     calls = {}
+  215: 
+  216:     canvas.draw_rectangle = lambda *args: None
+  217:     canvas.draw_scope_header = lambda *args: None
+  218:     canvas.render_text = lambda *args: None
+  219:     canvas.draw_scope_grid = lambda *args: None
+  220:     canvas.draw_scope_scrollbars = (
+  221:         lambda *args: calls.setdefault("scrollbars", args)
+  222:     )
+  223:     canvas.draw_empty_scope_rows = (
+  224:         lambda *args: calls.setdefault("empty_rows", args)
+  225:     )
+  226:     canvas.draw_scope_axis = lambda *args: None
+  227: 
+  228:     canvas.draw_oscilloscope((0, 0, 640, 260), monitor_items)
+  229: 
+  230:     visible_items = calls["empty_rows"][4]
+  231:     assert visible_items == monitor_items[3:6]
+  232:     assert calls["empty_rows"][6] == 3
+  233:     assert calls["scrollbars"][9] == 12
+  234:     assert calls["scrollbars"][10] == 3
+  235: 
+  236: 
+  237: def test_empty_scope_rows_draw_blank_aligned_traces():
+  238:     """Test if pre-run rows draw labels, level marks, and blank traces."""
+  239:     devices = FakeDevices(
+  240:         [fake_device("A"), fake_device("B")],
+  241:         {"A": "DATA_SW", "B": "FINAL_TEST"},
+  242:     )
+  243:     canvas = make_canvas(devices)
+  244:     monitor_items = [(("A", None), []), (("B", None), [])]
+  245:     labels = []
+  246:     colour_indexes = []
+  247:     level_rows = []
+  248:     traces = []
+  249: 
+  250:     def trace_colour(device_id, output_id, index):
+  251:         colour_indexes.append(index)
+  252:         return (index, 0, 0)
+  253: 
+  254:     canvas.trace_colour_for_monitor = trace_colour
+  255:     canvas.render_text = lambda text, *args: labels.append(text)
+  256:     canvas.draw_signal_level_scale = (
+  257:         lambda *args: level_rows.append(args)
+  258:     )
+  259:     canvas.draw_digital_signal = lambda *args: traces.append(args)
+  260: 
+  261:     canvas.draw_empty_scope_rows(
+  262:         10, 100, 20, 120, monitor_items, 5, first_row=4
+  263:     )
+  264: 
+  265:     assert labels == ["DATA_SW", "FINAL_TEST"]
+  266:     assert colour_indexes == [4, 5]
+  267:     assert len(level_rows) == 2
+  268:     assert len(traces) == 2
+  269:     assert traces[0][2] == [devices.BLANK] * 5
+  270:     assert traces[1][2] == [devices.BLANK] * 5
+  271: 
+  272: 
+  273: def test_trace_colour_for_monitor_handles_accessibility_modes():
+  274:     """Test if trace colours honour clock, QBAR, and colour-blind rules."""
+  275:     devices = FakeDevices(
+  276:         [
+  277:             fake_device("CLK", device_kind=FakeDevices.CLOCK),
+  278:             fake_device("DFF"),
+  279:         ]
+  280:     )
+  281:     canvas = make_canvas(devices)
+  282: 
+  283:     assert canvas.trace_colour_for_monitor("CLK", None, 0) == (
+  284:         0.20, 0.55, 0.25
+  285:     )
+  286:     assert canvas.trace_colour_for_monitor("DFF", devices.QBAR_ID, 1) == (
+  287:         0.48, 0.30, 0.68
+  288:     )
+  289: 
+  290:     canvas.colour_blind_mode = True
+  291: 
+  292:     assert canvas.trace_colour_for_monitor("CLK", None, 4) == (
+  293:         canvas.colour_blind_trace_colours[1]
+  294:     )
+  295: 
+  296: 
+  297: def test_circuit_content_size_grows_only_for_complex_diagrams():
+  298:     """Test if simple circuits fit while crowded circuits get scroll space."""
+  299:     simple_devices = FakeDevices(
+  300:         [
+  301:             fake_device("SW"),
+  302:             fake_device("GATE", inputs={"I1": ("SW", None)}),
+  303:         ],
+  304:         {"SW": "SW", "GATE": "GATE"},
+  305:     )
+  306:     simple_canvas = make_canvas(simple_devices)
+  307: 
+  308:     assert simple_canvas.circuit_content_size(500, 300) == (500, 300)
+  309: 
+  310:     crowded_device_list = [
+  311:         fake_device("SW_" + str(index)) for index in range(8)
+  312:     ]
+  313:     crowded_device_list.append(
+  314:         fake_device(
+  315:             "OUT",
+  316:             inputs={
+  317:                 "I" + str(index): ("SW_" + str(index), None)
+  318:                 for index in range(8)
+  319:             },
+  320:         )
+  321:     )
+  322:     crowded_devices = FakeDevices(
+  323:         crowded_device_list,
+  324:         {device.device_id: device.device_id for device in crowded_device_list},
+  325:     )
+  326:     crowded_canvas = make_canvas(crowded_devices)
+  327: 
+  328:     content_width, content_height = crowded_canvas.circuit_content_size(
+  329:         300, 220
+  330:     )
+  331: 
+  332:     assert content_width > 300
+  333:     assert content_height > 220
+  334: 
+  335: 
+  336: def test_reset_view_clears_canvas_scroll_and_zoom_state():
+  337:     """Test if reset view restores canvas navigation state."""
+  338:     devices = FakeDevices([fake_device("A")])
+  339:     canvas = make_canvas(devices)
+  340:     refreshed = []
+  341:     canvas.Refresh = lambda: refreshed.append(True)
+  342:     canvas.pan_x = 30
+  343:     canvas.pan_y = -20
+  344:     canvas.zoom = 1.5
+  345:     canvas.circuit_scroll_x = 42
+  346:     canvas.circuit_scroll_y = 64
+  347:     canvas.circuit_drag_mode = "vertical"
+  348:     canvas.scope_first_cycle = 15
+  349:     canvas.scope_first_row = 3
+  350:     canvas.scope_drag_mode = "horizontal"
+  351:     canvas.follow_latest_cycles = True
+  352:     canvas.init = True
+  353: 
+  354:     canvas.reset_view()
+  355: 
+  356:     assert canvas.pan_x == 0
+  357:     assert canvas.pan_y == 0
+  358:     assert canvas.zoom == 1.0
+  359:     assert canvas.circuit_scroll_x == 0
+  360:     assert canvas.circuit_scroll_y == 0
+  361:     assert canvas.circuit_drag_mode is None
+  362:     assert canvas.scope_first_cycle == 0
+  363:     assert canvas.scope_first_row == 0
+  364:     assert canvas.scope_drag_mode is None
+  365:     assert canvas.follow_latest_cycles is False
+  366:     assert canvas.init is False
+  367:     assert refreshed == [True]
+
+==============================================================================
+logsim/test_gui_controller.py
+==============================================================================
+    1: """Test GUI controller behaviour without opening a wxPython window."""
+    2: 
+    3: import pytest
+    4: 
+    5: from devices import Devices
+    6: from gui_controller import GuiController
+    7: from monitors import Monitors
+    8: from names import Names
+    9: from network import Network
+   10: 
+   11: 
+   12: @pytest.fixture
+   13: def controller():
+   14:     """Return a GUI controller with a small connected network."""
+   15:     names = Names()
+   16:     devices = Devices(names)
+   17:     network = Network(names, devices)
+   18:     monitors = Monitors(names, devices, network)
+   19: 
+   20:     [sw1_id, sw2_id, gate_id, i1_id, i2_id] = names.lookup(
+   21:         ["SW1", "SW2", "G1", "I1", "I2"]
+   22:     )
+   23:     devices.make_device(sw1_id, devices.SWITCH, 0)
+   24:     devices.make_device(sw2_id, devices.SWITCH, 1)
+   25:     devices.make_device(gate_id, devices.AND, 2)
+   26:     network.make_connection(sw1_id, None, gate_id, i1_id)
+   27:     network.make_connection(sw2_id, None, gate_id, i2_id)
+   28:     monitors.make_monitor(gate_id, None)
+   29: 
+   30:     return GuiController(names, devices, network, monitors)
+   31: 
+   32: 
+   33: def test_run_from_start_records_requested_cycles(controller):
+   34:     """Test if a cold run records monitor traces."""
+   35:     success, message = controller.run_from_start(3)
+   36: 
+   37:     assert success
+   38:     assert message == "Running for 3 cycles."
+   39:     assert controller.cycles_completed == 3
+   40:     assert len(controller.monitors.monitors_dictionary[(
+   41:         controller.names.query("G1"), None
+   42:     )]) == 3
+   43: 
+   44: 
+   45: def test_continue_requires_previous_run(controller):
+   46:     """Test if continue reports an error before the first run."""
+   47:     success, message = controller.continue_simulation(2)
+   48: 
+   49:     assert not success
+   50:     assert message == "Nothing to continue. Run first."
+   51: 
+   52: 
+   53: def test_continue_appends_trace_after_run(controller):
+   54:     """Test if continuing adds cycles without clearing traces."""
+   55:     controller.run_from_start(2)
+   56:     success, message = controller.continue_simulation(3)
+   57: 
+   58:     assert success
+   59:     assert message == "Continuing for 3 cycles. Total: 5."
+   60:     assert controller.cycles_completed == 5
+   61:     assert len(controller.monitors.monitors_dictionary[(
+   62:         controller.names.query("G1"), None
+   63:     )]) == 5
+   64: 
+   65: 
+   66: def test_step_simulation_cold_starts_then_advances(controller):
+   67:     """Test if stepping works before and after an initial run."""
+   68:     success, message = controller.step_simulation()
+   69: 
+   70:     assert success
+   71:     assert message == "Running for 1 cycles."
+   72:     assert controller.cycles_completed == 1
+   73: 
+   74:     success, message = controller.step_simulation()
+   75: 
+   76:     assert success
+   77:     assert message == "Advanced one cycle. Total: 2."
+   78:     assert controller.cycles_completed == 2
+   79: 
+   80: 
+   81: def test_set_switch_changes_switch_state(controller):
+   82:     """Test if a switch value can be changed by name."""
+   83:     success, message = controller.set_switch("SW1", 1)
+   84: 
+   85:     assert success
+   86:     assert message == "Set switch SW1 to 1."
+   87:     assert controller.devices.get_device(
+   88:         controller.names.query("SW1")
+   89:     ).switch_state == controller.devices.HIGH
+   90: 
+   91: 
+   92: def test_set_switch_rejects_non_switch(controller):
+   93:     """Test if non-switch devices cannot be changed as switches."""
+   94:     success, message = controller.set_switch("G1", 1)
+   95: 
+   96:     assert not success
+   97:     assert message == "G1 is not a switch."
+   98: 
+   99: 
+  100: def test_add_monitor_mid_run_pads_blank_cycles(controller):
+  101:     """Test if monitors added after running preserve time alignment."""
+  102:     controller.run_from_start(4)
+  103: 
+  104:     success, message = controller.add_monitor("SW1")
+  105: 
+  106:     assert success
+  107:     assert message == "Added monitor SW1."
+  108:     assert controller.monitors.monitors_dictionary[(
+  109:         controller.names.query("SW1"), None
+  110:     )] == [controller.devices.BLANK] * 4
+  111: 
+  112: 
+  113: def test_add_monitor_rejects_duplicate(controller):
+  114:     """Test if a duplicate monitor is rejected."""
+  115:     success, message = controller.add_monitor("G1")
+  116: 
+  117:     assert not success
+  118:     assert message == "Monitor already present: G1"
+  119: 
+  120: 
+  121: def test_remove_monitor_removes_selected_signal(controller):
+  122:     """Test if monitor removal updates the monitor dictionary."""
+  123:     success, message = controller.remove_monitor("G1")
+  124: 
+  125:     assert success
+  126:     assert message == "Removed monitor G1."
+  127:     assert (controller.names.query("G1"), None) not in (
+  128:         controller.monitors.monitors_dictionary
+  129:     )
+  130: 
+  131: 
+  132: def test_monitor_lists_split_current_and_available(controller):
+  133:     """Test if monitored and unmonitored output lists are correct."""
+  134:     assert controller.list_monitored_signals() == ["G1"]
+  135:     assert controller.list_unmonitored_signals() == ["SW1", "SW2"]
+  136: 
+  137: 
+  138: def test_unknown_signal_lookup_does_not_mutate_names(controller):
+  139:     """Test if invalid GUI input does not add names to the name table."""
+  140:     before = list(controller.names.names)
+  141: 
+  142:     success, message = controller.add_monitor("NO_SUCH_SIGNAL")
+  143: 
+  144:     assert not success
+  145:     assert message == "Unknown signal: NO_SUCH_SIGNAL"
+  146:     assert controller.names.names == before
+
+==============================================================================
+prelim/mk2227/exercise2.py
+==============================================================================
+    1: """Exercise 2: open a file supplied as a command-line argument."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: def open_file(path):
+    7:     """Open the file at path for reading and return the file object."""
+    8:     try:
+    9:         return open(path, "r", encoding="utf-8")
+   10:     except OSError as error:
+   11:         print(f"Error: could not open file '{path}': {error}")
+   12:         sys.exit(1)
+   13: 
+   14: 
+   15: def main():
+   16:     """Extract the file path from the command line and open the file."""
+   17:     if len(sys.argv) != 2:
+   18:         print("Usage: python exercise2.py <file_path>")
+   19:         sys.exit(1)
+   20: 
+   21:     path = sys.argv[1]
+   22:     print(path)
+   23: 
+   24:     file_object = open_file(path)
+   25:     file_object.close()
+   26: 
+   27: 
+   28: if __name__ == "__main__":
+   29:     main()
+
+==============================================================================
+prelim/mk2227/exercise3.py
+==============================================================================
+    1: """Exercise 3: read and print a file one character at a time."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: def open_file(path):
+    7:     """Open the file at path for reading and return the file object."""
+    8:     try:
+    9:         return open(path, "r", encoding="utf-8")
+   10:     except OSError as error:
+   11:         print(f"Error: could not open file '{path}': {error}")
+   12:         sys.exit(1)
+   13: 
+   14: 
+   15: def get_next_character(file_object):
+   16:     """Return the next character from the file."""
+   17:     return file_object.read(1)
+   18: 
+   19: 
+   20: def main():
+   21:     """Print the contents of the file one character at a time."""
+   22:     if len(sys.argv) != 2:
+   23:         print("Usage: python exercise3.py <file_path>")
+   24:         sys.exit(1)
+   25: 
+   26:     path = sys.argv[1]
+   27:     file_object = open_file(path)
+   28: 
+   29:     character = get_next_character(file_object)
+   30: 
+   31:     while character != "":
+   32:         print(character, end="")
+   33:         character = get_next_character(file_object)
+   34: 
+   35:     file_object.close()
+   36: 
+   37: 
+   38: if __name__ == "__main__":
+   39:     main()
+
+==============================================================================
+prelim/mk2227/exercise4.py
+==============================================================================
+    1: """Exercise 4: read and print only non-whitespace characters."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: def open_file(path):
+    7:     """Open the file at path for reading and return the file object."""
+    8:     try:
+    9:         return open(path, "r", encoding="utf-8")
+   10:     except OSError as error:
+   11:         print(f"Error: could not open file '{path}': {error}")
+   12:         sys.exit(1)
+   13: 
+   14: 
+   15: def get_next_character(file_object):
+   16:     """Return the next character from the file."""
+   17:     return file_object.read(1)
+   18: 
+   19: 
+   20: def get_next_non_whitespace_character(file_object):
+   21:     """Return the next non-whitespace character from the file."""
+   22:     character = get_next_character(file_object)
+   23: 
+   24:     while character != "" and character.isspace():
+   25:         character = get_next_character(file_object)
+   26: 
+   27:     return character
+   28: 
+   29: 
+   30: def main():
+   31:     """Print the file contents without whitespace."""
+   32:     if len(sys.argv) != 2:
+   33:         print("Usage: python exercise4.py <file_path>")
+   34:         sys.exit(1)
+   35: 
+   36:     path = sys.argv[1]
+   37:     file_object = open_file(path)
+   38: 
+   39:     file_object.seek(0)
+   40:     character = get_next_non_whitespace_character(file_object)
+   41: 
+   42:     while character != "":
+   43:         print(character, end="")
+   44:         character = get_next_non_whitespace_character(file_object)
+   45: 
+   46:     file_object.close()
+   47: 
+   48: 
+   49: if __name__ == "__main__":
+   50:     main()
+
+==============================================================================
+prelim/mk2227/exercise5.py
+==============================================================================
+    1: """Exercise 4: read and print only non-whitespace characters."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: def open_file(path):
+    7:     """Open the file at path for reading and return the file object."""
+    8:     try:
+    9:         return open(path, "r", encoding="utf-8")
+   10:     except OSError as error:
+   11:         print(f"Error: could not open file '{path}': {error}")
+   12:         sys.exit(1)
+   13: 
+   14: 
+   15: def get_next_character(file_object):
+   16:     """Return the next character from the file."""
+   17:     return file_object.read(1)
+   18: 
+   19: 
+   20: def get_next_non_whitespace_character(file_object):
+   21:     """Return the next non-whitespace character from the file."""
+   22:     character = get_next_character(file_object)
+   23: 
+   24:     while character != "" and character.isspace():
+   25:         character = get_next_character(file_object)
+   26: 
+   27:     return character
+   28: 
+   29: 
+   30: def main():
+   31:     """Print the file contents without whitespace."""
+   32:     if len(sys.argv) != 2:
+   33:         print("Usage: python exercise4.py <file_path>")
+   34:         sys.exit(1)
+   35: 
+   36:     path = sys.argv[1]
+   37:     file_object = open_file(path)
+   38: 
+   39:     file_object.seek(0)
+   40:     character = get_next_non_whitespace_character(file_object)
+   41: 
+   42:     while character != "":
+   43:         print(character, end="")
+   44:         character = get_next_non_whitespace_character(file_object)
+   45: 
+   46:     file_object.close()
+   47: 
+   48: 
+   49: if __name__ == "__main__":
+   50:     main()
+
+==============================================================================
+prelim/mk2227/exercise6.py
+==============================================================================
+    1: """Exercise 6: find and print all names in a file."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: def open_file(path):
+    7:     """Open the file at path for reading and return the file object."""
+    8:     try:
+    9:         return open(path, "r", encoding="utf-8")
+   10:     except OSError as error:
+   11:         print(f"Error: could not open file '{path}': {error}")
+   12:         sys.exit(1)
+   13: 
+   14: 
+   15: def get_next_character(file_object):
+   16:     """Return the next character from the file."""
+   17:     return file_object.read(1)
+   18: 
+   19: 
+   20: def get_next_name(file_object):
+   21:     """Return the next name and the following non-alphanumeric character."""
+   22:     character = get_next_character(file_object)
+   23: 
+   24:     while character != "" and not character.isalpha():
+   25:         character = get_next_character(file_object)
+   26: 
+   27:     if character == "":
+   28:         return [None, ""]
+   29: 
+   30:     name = ""
+   31: 
+   32:     while character != "" and character.isalnum():
+   33:         name += character
+   34:         character = get_next_character(file_object)
+   35: 
+   36:     return [name, character]
+   37: 
+   38: 
+   39: def main():
+   40:     """Print all names found in the file."""
+   41:     if len(sys.argv) != 2:
+   42:         print("Usage: python exercise6.py <file_path>")
+   43:         sys.exit(1)
+   44: 
+   45:     path = sys.argv[1]
+   46:     file_object = open_file(path)
+   47: 
+   48:     file_object.seek(0)
+   49:     name, next_character = get_next_name(file_object)
+   50: 
+   51:     while name is not None:
+   52:         print(name)
+   53: 
+   54:         if next_character == "":
+   55:             break
+   56: 
+   57:         name, next_character = get_next_name(file_object)
+   58: 
+   59:     file_object.close()
+   60: 
+   61: 
+   62: if __name__ == "__main__":
+   63:     main()
+
+==============================================================================
+prelim/mk2227/exercise7.py
+==============================================================================
+    1: """Exercise 7: use a simple name table to filter bad names."""
+    2: 
+    3: import sys
+    4: 
+    5: 
+    6: class MyNames:
+    7:     """Map name strings to unique integer IDs."""
+    8: 
+    9:     def __init__(self):
+   10:         """Initialise an empty name table."""
+   11:         self.names = []
+   12: 
+   13:     def lookup(self, name_string):
+   14:         """Return the ID for name_string, adding it if necessary."""
+   15:         if name_string in self.names:
+   16:             return self.names.index(name_string)
+   17: 
+   18:         self.names.append(name_string)
+   19:         return len(self.names) - 1
+   20: 
+   21:     def get_string(self, name_id):
+   22:         """Return the string for name_id, or None if the ID is invalid."""
+   23:         if isinstance(name_id, int) and 0 <= name_id < len(self.names):
+   24:             return self.names[name_id]
+   25: 
+   26:         return None
+   27: 
+   28: 
+   29: def open_file(path):
+   30:     """Open the file at path for reading and return the file object."""
+   31:     try:
+   32:         return open(path, "r", encoding="utf-8")
+   33:     except OSError as error:
+   34:         print(f"Error: could not open file '{path}': {error}")
+   35:         sys.exit(1)
+   36: 
+   37: 
+   38: def get_next_character(file_object):
+   39:     """Return the next character from the file."""
+   40:     return file_object.read(1)
+   41: 
+   42: 
+   43: def get_next_name(file_object):
+   44:     """Return the next name and the following non-alphanumeric character."""
+   45:     character = get_next_character(file_object)
+   46: 
+   47:     while character != "" and not character.isalpha():
+   48:         character = get_next_character(file_object)
+   49: 
+   50:     if character == "":
+   51:         return [None, ""]
+   52: 
+   53:     name = ""
+   54: 
+   55:     while character != "" and character.isalnum():
+   56:         name += character
+   57:         character = get_next_character(file_object)
+   58: 
+   59:     return [name, character]
+   60: 
+   61: 
+   62: def main():
+   63:     """Print all names except the bad names."""
+   64:     if len(sys.argv) != 2:
+   65:         print("Usage: python exercise7.py <file_path>")
+   66:         sys.exit(1)
+   67: 
+   68:     path = sys.argv[1]
+   69:     file_object = open_file(path)
+   70: 
+   71:     names = MyNames()
+   72: 
+   73:     bad_name_ids = [
+   74:         names.lookup("Ghastly"),
+   75:         names.lookup("Terrible"),
+   76:         names.lookup("Horrid"),
+   77:     ]
+   78: 
+   79:     file_object.seek(0)
+   80:     name, next_character = get_next_name(file_object)
+   81: 
+   82:     while name is not None:
+   83:         name_id = names.lookup(name)
+   84: 
+   85:         if name_id not in bad_name_ids:
+   86:             print(names.get_string(name_id))
+   87: 
+   88:         if next_character == "":
+   89:             break
+   90: 
+   91:         name, next_character = get_next_name(file_object)
+   92: 
+   93:     file_object.close()
+   94: 
+   95: 
+   96: if __name__ == "__main__":
+   97:     main()
+
+==============================================================================
+prelim/mk2227/exercise8.py
+==============================================================================
+    1: """Exercise 8: pytest tests for the MyNames class."""
+    2: 
+    3: from exercise7 import MyNames
+    4: 
+    5: 
+    6: def test_lookup_adds_first_name():
+    7:     """Test that the first new name gets ID 0."""
+    8:     names = MyNames()
+    9: 
+   10:     assert names.lookup("Alice") == 0
+   11:     assert names.get_string(0) == "Alice"
+   12: 
+   13: 
+   14: def test_lookup_adds_multiple_names():
+   15:     """Test that different names get different IDs."""
+   16:     names = MyNames()
+   17: 
+   18:     assert names.lookup("Alice") == 0
+   19:     assert names.lookup("Bob") == 1
+   20:     assert names.lookup("Charlie") == 2
+   21: 
+   22:     assert names.get_string(0) == "Alice"
+   23:     assert names.get_string(1) == "Bob"
+   24:     assert names.get_string(2) == "Charlie"
+   25: 
+   26: 
+   27: def test_lookup_existing_name_returns_same_id():
+   28:     """Test that looking up the same name returns the same ID."""
+   29:     names = MyNames()
+   30: 
+   31:     first_id = names.lookup("Alice")
+   32:     second_id = names.lookup("Alice")
+   33: 
+   34:     assert first_id == second_id
+   35:     assert len(names.names) == 1
+   36: 
+   37: 
+   38: def test_get_string_invalid_negative_id():
+   39:     """Test that a negative ID returns None."""
+   40:     names = MyNames()
+   41: 
+   42:     names.lookup("Alice")
+   43: 
+   44:     assert names.get_string(-1) is None
+   45: 
+   46: 
+   47: def test_get_string_invalid_large_id():
+   48:     """Test that an out-of-range ID returns None."""
+   49:     names = MyNames()
+   50: 
+   51:     names.lookup("Alice")
+   52: 
+   53:     assert names.get_string(1) is None
+   54: 
+   55: 
+   56: def test_get_string_invalid_non_integer_id():
+   57:     """Test that a non-integer ID returns None."""
+   58:     names = MyNames()
+   59: 
+   60:     names.lookup("Alice")
+   61: 
+   62:     assert names.get_string("Alice") is None
+   63: 
+   64: 
+   65: def test_lookup_is_case_sensitive():
+   66:     """Test that names with different capitalisation are different."""
+   67:     names = MyNames()
+   68: 
+   69:     assert names.lookup("alice") == 0
+   70:     assert names.lookup("Alice") == 1
+
+==============================================================================
+requirements.txt
+==============================================================================
+    1: wxPython
+    2: PyOpenGL
+    3: pytest
+    4: pycodestyle
+    5: pydocstyle

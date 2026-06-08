@@ -15,7 +15,7 @@ DEVICES {
 
 CONNECT {
     # SUM = A XOR B XOR CIN
-    Z -> XOR_AB.I1;
+    A -> XOR_AB.I1;
     B -> XOR_AB.I2;
 
     XOR_AB -> SUM.I1;
