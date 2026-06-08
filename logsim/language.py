@@ -1,6 +1,7 @@
 """Load and select GUI languages for the logic simulator."""
 
 import json
+import locale as python_locale
 import os
 from pathlib import Path
 
@@ -102,25 +103,71 @@ def language_from_wx_locale(wx_module, supported_languages=None):
     return None
 
 
-def initialise_wx_locale(wx_module):
+def language_from_python_locale(supported_languages=None, locale_module=None):
+    """Return the desktop/account language reported by Python locale."""
+    if locale_module is None:
+        locale_module = python_locale
+
+    locale_names = []
+    try:
+        locale_names.append(locale_module.getlocale()[0])
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    try:
+        locale_names.append(locale_module.getdefaultlocale()[0])
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    supported_languages = set(supported_languages or [])
+    for locale_name in locale_names:
+        code = normalise_language_code(locale_name)
+        if code and (not supported_languages or code in supported_languages):
+            return code
+
+    return None
+
+
+def wx_language_id(wx_module, language_code):
+    """Return the wx language constant for a catalogue language code."""
+    constant_names = {
+        "ar": ["LANGUAGE_ARABIC", "LANGUAGE_ARABIC_SAUDI_ARABIA"],
+        "de": ["LANGUAGE_GERMAN"],
+        "en": ["LANGUAGE_ENGLISH", "LANGUAGE_ENGLISH_UK"],
+        "es": ["LANGUAGE_SPANISH"],
+        "fr": ["LANGUAGE_FRENCH"],
+    }
+    for constant_name in constant_names.get(language_code, []):
+        if hasattr(wx_module, constant_name):
+            return getattr(wx_module, constant_name)
+    return getattr(wx_module, "LANGUAGE_DEFAULT", -1)
+
+
+def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
     """Initialise and return a wx.Locale object for this application."""
     if wx_module is None or not hasattr(wx_module, "Locale"):
         return None
 
     try:
         locale_object = wx_module.Locale()
-        default_language = getattr(wx_module, "LANGUAGE_DEFAULT", -1)
-        locale_object.Init(default_language)
+        locale_object.Init(wx_language_id(wx_module, language_code))
     except (AttributeError, TypeError, RuntimeError):
         return None
 
     return locale_object
 
 
-def choose_language(translations, wx_module=None, environ=None):
+def choose_language(translations, wx_module=None, environ=None,
+                    locale_module=None):
     """Choose the best available language for the GUI."""
     supported_languages = set(translations)
     language_code = language_from_environment(environ, supported_languages)
+    if language_code:
+        return language_code
+
+    language_code = language_from_python_locale(
+        supported_languages, locale_module
+    )
     if language_code:
         return language_code
 

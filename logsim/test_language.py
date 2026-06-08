@@ -2,13 +2,16 @@
 
 from types import SimpleNamespace
 
+from logsim import detect_startup_language
 from language import (
     choose_language,
     language_from_environment,
+    language_from_python_locale,
     load_language_names,
     load_translations,
     normalise_language_code,
     translate,
+    wx_language_id,
 )
 
 
@@ -52,9 +55,101 @@ def test_lang_overrides_other_locale_variables_for_logsim():
     assert choose_language(translations, environ=environ) == "ar"
 
 
+def test_choose_language_uses_python_account_locale_when_env_unset():
+    """Test if the account locale can select Spanish at startup."""
+    translations = load_translations()
+
+    class FakeLocaleModule:
+        """Small stand-in for the Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "es_ES", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "es_ES", "UTF-8"
+
+    assert language_from_python_locale(translations, FakeLocaleModule) == "es"
+    assert choose_language(
+        translations, environ={}, locale_module=FakeLocaleModule
+    ) == "es"
+
+
+def test_env_lang_overrides_python_account_locale():
+    """Test if explicit LANG beats the account locale."""
+    translations = load_translations()
+
+    class FakeLocaleModule:
+        """Small stand-in for the Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "es_ES", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "es_ES", "UTF-8"
+
+    assert choose_language(
+        translations,
+        environ={"LANG": "ar_SA.utf8"},
+        locale_module=FakeLocaleModule,
+    ) == "ar"
+
+
+def test_logsim_detects_startup_language_before_wx_starts():
+    """Test if logsim preserves account language before wx.App exists."""
+
+    class FakeLocaleModule:
+        """Small stand-in for the Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "es_ES", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "es_ES", "UTF-8"
+
+    assert detect_startup_language({}, FakeLocaleModule) == "es"
+
+
+def test_wx_language_id_uses_selected_language_constant():
+    """Test if wx.Locale is initialised with the selected language."""
+    fake_wx = SimpleNamespace(
+        LANGUAGE_DEFAULT=-1,
+        LANGUAGE_SPANISH=2,
+        LANGUAGE_ARABIC=3,
+    )
+
+    assert wx_language_id(fake_wx, "es") == 2
+    assert wx_language_id(fake_wx, "ar") == 3
+    assert wx_language_id(fake_wx, "unknown") == -1
+
+
 def test_choose_language_uses_wx_account_locale_when_env_unset():
     """Test if the desktop/account language can select a catalogue."""
     translations = load_translations()
+
+    class NoLocaleModule:
+        """Small stand-in for an unset Python locale module."""
+
+        @staticmethod
+        def getlocale():
+            """Return no active locale."""
+            return None, None
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return no default locale."""
+            return None, None
 
     class FakeLocale:
         """Small stand-in for wx.Locale."""
@@ -71,7 +166,9 @@ def test_choose_language_uses_wx_account_locale_when_env_unset():
 
     fake_wx = SimpleNamespace(Locale=FakeLocale)
 
-    assert choose_language(translations, fake_wx, environ={}) == "fr"
+    assert choose_language(
+        translations, fake_wx, environ={}, locale_module=NoLocaleModule
+    ) == "fr"
 
 
 def test_translate_falls_back_to_english():

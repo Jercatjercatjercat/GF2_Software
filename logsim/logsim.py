@@ -21,6 +21,21 @@ from monitors import Monitors
 from scanner import Scanner
 from parse import Parser, parse_network_with_diagnostics
 from userint import UserInterface
+from language import (
+    language_from_environment,
+    language_from_python_locale,
+    load_translations,
+)
+
+
+def detect_startup_language(environ=None, locale_module=None):
+    """Return an explicit process or account language, if one is set."""
+    translations = load_translations()
+    supported_languages = set(translations)
+    return (
+        language_from_environment(environ, supported_languages)
+        or language_from_python_locale(supported_languages, locale_module)
+    )
 
 
 def main(arg_list):
@@ -69,6 +84,7 @@ def main(arg_list):
         scanner = Scanner(path, names)
         parser = Parser(names, devices, network, monitors, scanner)
         success, diagnostics = parse_network_with_diagnostics(parser)
+        startup_language = detect_startup_language()
 
         # Initialise wx here so GUI parse errors can be reported both in the
         # terminal and in a graphical dialog.
@@ -78,11 +94,11 @@ def main(arg_list):
         app = wx.App()
         if success:
             gui = Gui("Logic Simulator", path, names, devices, network,
-                      monitors)
+                      monitors, startup_language)
             gui.Show(True)
             app.MainLoop()
         else:
-            show_parse_error_dialog(None, path, diagnostics)
+            show_parse_error_dialog(None, path, diagnostics, startup_language)
             sys.exit(1)
 
 

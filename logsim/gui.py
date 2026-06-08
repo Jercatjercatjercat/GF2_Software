@@ -31,10 +31,11 @@ from parse import Parser, parse_network_with_diagnostics
 from gui_controller import GuiController
 
 
-def show_parse_error_dialog(parent, path, diagnostics):
+def show_parse_error_dialog(parent, path, diagnostics, language_code=None):
     """Show parser diagnostics in the GUI as well as the terminal."""
     translations = load_translations()
-    language_code = choose_language(translations, wx)
+    if language_code not in translations:
+        language_code = choose_language(translations, wx)
 
     def t(key):
         """Return translated text for the parser dialog."""
@@ -1709,12 +1710,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 class Gui(wx.Frame):
     """Configure the main GUI window and widgets."""
 
-    def __init__(self, title, path, names, devices, network, monitors):
+    def __init__(self, title, path, names, devices, network, monitors,
+                 initial_language=None):
         """Initialise widgets, controller, and layout."""
-        self.wx_locale = initialise_wx_locale(wx)
         self.translations = self.build_translations()
         self.language_names = self.build_language_names()
-        self.current_language = choose_language(self.translations, wx)
+        if initial_language in self.translations:
+            self.current_language = initial_language
+        else:
+            self.current_language = choose_language(self.translations, wx)
+        self.wx_locale = initialise_wx_locale(wx, self.current_language)
         translated_title = self.t("window_title")
         if translated_title == "window_title":
             translated_title = title
