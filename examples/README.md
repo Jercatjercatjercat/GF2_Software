@@ -175,6 +175,32 @@ q
 
 In the GUI, use the run/continue controls, resize the window, and add/remove monitors such as `MEMORY_CELL_LONG_NAME.Q`, `FINAL_OR_OUTPUT`, and `WIDE_AND_SIX_INPUTS`.
 
+## Example 6: RC reset with SIGGEN clock
+
+Text interface:
+
+```bash
+python3 logsim/logsim.py -c examples/example6_rc_siggen_dtype.txt
+```
+
+Graphical interface:
+
+```bash
+python3 logsim/logsim.py examples/example6_rc_siggen_dtype.txt
+```
+
+This file uses `RC(2)` to briefly clear a DTYPE on power-up, and `SIGGEN(0, 1, 0, 1)` to provide a repeating clock-like waveform.
+
+At the text prompt, try:
+
+```text
+r 8
+c 8
+m FF1.Q
+m FF1.QBAR
+q
+```
+
 ## Automated checks
 
 Run:
