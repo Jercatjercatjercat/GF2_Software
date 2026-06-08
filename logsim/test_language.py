@@ -38,6 +38,20 @@ def test_language_from_environment_accepts_arabic_locale():
     assert choose_language(translations, environ=environ) == "ar"
 
 
+def test_lang_overrides_other_locale_variables_for_logsim():
+    """Test if LANG is the explicit launch override from the handout."""
+    translations = load_translations()
+    environ = {
+        "LANG": "ar_SA.utf8",
+        "LANGUAGE": "en_GB.utf8",
+        "LC_ALL": "en_GB.utf8",
+        "LC_MESSAGES": "en_GB.utf8",
+    }
+
+    assert language_from_environment(environ, translations) == "ar"
+    assert choose_language(translations, environ=environ) == "ar"
+
+
 def test_choose_language_uses_wx_account_locale_when_env_unset():
     """Test if the desktop/account language can select a catalogue."""
     translations = load_translations()

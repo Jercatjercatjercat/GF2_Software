@@ -63,7 +63,7 @@ def language_from_environment(environ=None, supported_languages=None):
         environ = os.environ
 
     supported_languages = set(supported_languages or [])
-    for variable in ["LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"]:
+    for variable in ["LANG", "LC_ALL", "LC_MESSAGES", "LANGUAGE"]:
         code = normalise_language_code(environ.get(variable))
         if code and (not supported_languages or code in supported_languages):
             return code
