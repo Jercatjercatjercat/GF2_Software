@@ -594,4 +594,5 @@ END;
     output = capsys.readouterr().out
     assert "Syntax error at line 2, column 5" in output
     assert "    123A : SWITCH(0);\n    ^" in output
+    assert output.endswith("\n\n")
 

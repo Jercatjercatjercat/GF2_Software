@@ -79,8 +79,14 @@ class Parser:
         self._expect_symbol(self.scanner.EOF, "expected end of file after END")
 
         self._report_unconnected_inputs()
+        self._print_session_separator_if_errors()
 
         return self.error_count == 0
+
+    def _print_session_separator_if_errors(self) -> None:
+        """Print spacing after a failed parse session in the terminal."""
+        if self.error_count > 0:
+            print("\n")
 
     def _parse_devices_section(self) -> None:
         """Parse the DEVICES section."""
