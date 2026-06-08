@@ -1608,7 +1608,7 @@ class Gui(wx.Frame):
 
     def __init__(self, title, path, names, devices, network, monitors):
         """Initialise widgets, controller, and layout."""
-        super().__init__(parent=None, title=title, size=(1000, 700))
+        super().__init__(parent=None, title=title, size=(1120, 760))
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
@@ -1632,7 +1632,7 @@ class Gui(wx.Frame):
         self.refresh_choices()
         self.set_status("Loaded " + path)
 
-        self.SetSizeHints(760, 520)
+        self.SetSizeHints(980, 620)
 
     def build_translations(self):
         """Return UI label translations keyed by language code."""
@@ -2101,7 +2101,8 @@ class Gui(wx.Frame):
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
         root_sizer = wx.BoxSizer(wx.VERTICAL)
-        toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        run_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        file_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -2110,44 +2111,46 @@ class Gui(wx.Frame):
         self.monitor_box = wx.StaticBox(self, label=self.t("monitors"))
         self.readings_box = wx.StaticBox(self, label=self.t("readings"))
         self.log_box = wx.StaticBox(self, label=self.t("log"))
+        self.reparent_side_panel_controls()
         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
         readings_box = wx.StaticBoxSizer(self.readings_box, wx.VERTICAL)
         log_box = wx.StaticBoxSizer(self.log_box, wx.VERTICAL)
 
-        toolbar_sizer.Add(self.cycles_label, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
-        toolbar_sizer.Add(self.cycles_spin, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.run_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.continue_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.step_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
-        toolbar_sizer.Add(self.auto_run_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.speed_label, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
-        toolbar_sizer.Add(self.speed_slider, 1,
-                          wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 6)
-        toolbar_sizer.AddStretchSpacer()
-        toolbar_sizer.Add(self.open_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.save_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.export_circuit_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.export_scope_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.language_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.dark_mode_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.colour_blind_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        toolbar_sizer.Add(self.help_button, 0,
-                          wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
+        run_toolbar_sizer.Add(self.cycles_label, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
+        run_toolbar_sizer.Add(self.cycles_spin, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.run_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.continue_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.step_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 6)
+        run_toolbar_sizer.Add(self.auto_run_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.speed_label, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 12)
+        run_toolbar_sizer.Add(self.speed_slider, 1,
+                              wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10)
+
+        file_toolbar_sizer.AddStretchSpacer()
+        file_toolbar_sizer.Add(self.open_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.save_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.export_circuit_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.export_scope_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.language_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.dark_mode_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.colour_blind_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        file_toolbar_sizer.Add(self.help_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
         switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
@@ -2171,17 +2174,36 @@ class Gui(wx.Frame):
         side_sizer.Add(switch_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(readings_box, 1, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(log_box, 0, wx.EXPAND | wx.ALL, 6)
 
         display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
-        display_sizer.Add(
-            log_box, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6
-        )
 
         main_sizer.Add(display_sizer, 1, wx.EXPAND)
         main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        root_sizer.Add(toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        root_sizer.Add(run_toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        root_sizer.Add(file_toolbar_sizer, 0,
+                       wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
         self.SetSizer(root_sizer)
+
+    def reparent_side_panel_controls(self):
+        """Make side-panel widgets children of their native group boxes."""
+        for control in [
+            self.switch_label, self.switch_choice, self.switch_value,
+            self.set_switch_button,
+        ]:
+            control.Reparent(self.switch_box)
+
+        for control in [
+            self.add_monitor_label, self.add_monitor_choice,
+            self.add_monitor_button, self.remove_monitor_label,
+            self.remove_monitor_choice, self.remove_monitor_button,
+            self.reset_view_button,
+        ]:
+            control.Reparent(self.monitor_box)
+
+        self.readings_list.Reparent(self.readings_box)
+        self.log_text.Reparent(self.log_box)
 
     def bind_events(self):
         """Bind widget events to handlers."""
