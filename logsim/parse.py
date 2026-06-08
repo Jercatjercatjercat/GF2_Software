@@ -9,7 +9,7 @@ Classes
 Parser - parses the definition file and builds the logic network.
 """
 
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 
 class Parser:
@@ -141,7 +141,7 @@ class Parser:
         )
         self._handle_device_error(error, device_id)
 
-    def _parse_device_spec(self) -> tuple[int | None, int | None]:
+    def _parse_device_spec(self) -> Tuple[Optional[int], Optional[int]]:
         """Parse a device specification and return kind and property."""
         if self._is_keyword(self.scanner.SWITCH_ID):
             self._advance()
@@ -200,7 +200,7 @@ class Parser:
         self._report_syntax_error("expected device type")
         return None, None
 
-    def _parse_bit(self) -> int | None:
+    def _parse_bit(self) -> Optional[int]:
         """Parse a bit value, either 0 or 1."""
         if (self.symbol.type == self.scanner.NUMBER and
                 self.symbol.id in [0, 1]):
@@ -211,6 +211,27 @@ class Parser:
         self._report_syntax_error("expected bit value 0 or 1")
         self._advance_if_needed()
         return None
+
+    def _parse_siggen_pattern(self) -> List[int]:
+        """Parse a SIGGEN waveform as a non-empty list of bits."""
+        pattern = []
+        first_bit = self._parse_bit()
+        if first_bit is not None:
+            pattern.append(first_bit)
+
+        while self.symbol.type == self.scanner.COMMA:
+            self._advance()
+            if self.symbol.type == self.scanner.RIGHT_PAREN:
+                self._report_syntax_error(
+                    "expected bit value 0 or 1 after ','"
+                )
+                break
+
+            bit = self._parse_bit()
+            if bit is not None:
+                pattern.append(bit)
+
+        return pattern
 
     def _parse_positive_integer(self) -> Optional[int]:
         """Parse a positive integer."""
@@ -264,7 +285,7 @@ class Parser:
             input_device_id, input_port_id
         )
 
-    def _parse_input_signal(self) -> tuple[Optional[int], Optional[int]]:
+    def _parse_input_signal(self) -> Tuple[Optional[int], Optional[int]]:
         """Parse an input signal and return device and input IDs."""
         device_id = self._parse_name("expected input device name")
         self._expect_symbol(self.scanner.DOT, "expected '.' in input signal")
@@ -277,7 +298,7 @@ class Parser:
             self.input_port_ids, "expected input port"
         )
 
-    def _parse_output_signal(self) -> tuple[Optional[int], Optional[int]]:
+    def _parse_output_signal(self) -> Tuple[Optional[int], Optional[int]]:
         """Parse an output signal and return device and output IDs."""
         device_id = self._parse_name("expected output device name")
         output_id = None
