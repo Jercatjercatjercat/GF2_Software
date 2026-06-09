@@ -22,22 +22,42 @@ from scanner import Scanner
 from parse import Parser, parse_network_with_diagnostics
 from userint import UserInterface
 from language import (
+    language_from_linux_locale,
     language_from_environment,
     language_from_python_locale,
     language_from_windows_locale,
     load_translations,
+    non_default_language,
 )
 
 
 def detect_startup_language(environ=None, locale_module=None,
-                            windows_api=None):
+                            windows_api=None, linux_config_paths=None,
+                            wsl_command_runner=None, osrelease_path=None):
     """Return an explicit process or account language, if one is set."""
     translations = load_translations()
     supported_languages = set(translations)
     return (
-        language_from_environment(environ, supported_languages)
-        or language_from_windows_locale(supported_languages, windows_api)
-        or language_from_python_locale(supported_languages, locale_module)
+        non_default_language(
+            language_from_environment(environ, supported_languages)
+        )
+        or non_default_language(
+            language_from_windows_locale(
+                supported_languages,
+                windows_api,
+                environ,
+                wsl_command_runner,
+                osrelease_path,
+            )
+        )
+        or non_default_language(
+            language_from_linux_locale(
+                supported_languages, environ, linux_config_paths
+            )
+        )
+        or non_default_language(
+            language_from_python_locale(supported_languages, locale_module)
+        )
     )
 
 

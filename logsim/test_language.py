@@ -7,13 +7,16 @@ from language import (
     choose_language,
     initialise_wx_locale,
     language_from_environment,
+    language_from_linux_locale,
     language_from_python_locale,
     language_from_wx_locale,
     language_from_windows_locale,
     load_language_names,
     load_translations,
     normalise_language_code,
+    running_under_wsl,
     translate,
+    wsl_windows_locale_names,
     wx_language_id,
 )
 
@@ -119,6 +122,132 @@ def test_env_lang_overrides_python_account_locale():
         translations,
         environ={"LANG": "ar_SA.utf8"},
         locale_module=FakeLocaleModule,
+    ) == "ar"
+
+
+def test_english_lang_does_not_block_wx_display_language():
+    """Test if default English LANG lets the desktop language win."""
+    translations = load_translations()
+
+    class EnglishLocaleModule:
+        """Small stand-in for Python reporting an English locale."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "en_GB", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "en_GB", "UTF-8"
+
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    class FakeLocale:
+        """Small stand-in for wx.Locale."""
+
+        @staticmethod
+        def GetSystemLanguage():
+            """Return a fake wx language ID."""
+            return 1
+
+        @staticmethod
+        def GetLanguageInfo(_language_id):
+            """Return fake desktop language information."""
+            return SimpleNamespace(CanonicalName="fr_FR")
+
+    fake_wx = SimpleNamespace(Locale=FakeLocale)
+
+    assert choose_language(
+        translations,
+        fake_wx,
+        environ={"LANG": "en_GB.UTF-8"},
+        locale_module=EnglishLocaleModule,
+        windows_api=NoWindowsApi,
+        linux_config_paths=[],
+    ) == "fr"
+
+
+def test_choose_language_uses_linux_desktop_language(tmp_path):
+    """Test if Linux desktop language can override default English LANG."""
+    translations = load_translations()
+    config_path = tmp_path / "user"
+    config_path.write_text("[User]\nLanguage=fr_FR.UTF-8\n",
+                           encoding="utf-8")
+
+    class EnglishLocaleModule:
+        """Small stand-in for Python reporting an English locale."""
+
+        @staticmethod
+        def getlocale():
+            """Return a fake active locale."""
+            return "en_GB", "UTF-8"
+
+        @staticmethod
+        def getdefaultlocale():
+            """Return a fake account/default locale."""
+            return "en_GB", "UTF-8"
+
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    assert language_from_linux_locale(translations, {}, [config_path]) == "fr"
+    assert choose_language(
+        translations,
+        environ={"LANG": "en_GB.UTF-8"},
+        locale_module=EnglishLocaleModule,
+        windows_api=NoWindowsApi,
+        linux_config_paths=[config_path],
+    ) == "fr"
+
+
+def test_explicit_non_english_lang_overrides_linux_desktop_language(tmp_path):
+    """Test if a non-English LANG remains a launch-time override."""
+    translations = load_translations()
+    config_path = tmp_path / "user"
+    config_path.write_text("[User]\nLanguage=fr_FR.UTF-8\n",
+                           encoding="utf-8")
+
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    assert choose_language(
+        translations,
+        environ={"LANG": "ar_SA.UTF-8"},
+        windows_api=NoWindowsApi,
+        linux_config_paths=[config_path],
     ) == "ar"
 
 
@@ -249,6 +378,30 @@ def test_windows_language_id_overrides_english_locale_name():
             return [0x0C0A]
 
     assert language_from_windows_locale(translations, FakeWindowsApi) == "es"
+
+
+def test_wsl_windows_ui_language_can_be_read_from_linux(tmp_path):
+    """Test if WSL can ask Windows for its UI language."""
+    translations = load_translations()
+    osrelease_path = tmp_path / "osrelease"
+    osrelease_path.write_text("5.15.90.1-microsoft-standard-WSL2",
+                              encoding="utf-8")
+
+    def fake_runner(command):
+        """Return a fake PowerShell UI culture."""
+        assert command[0] == "powershell.exe"
+        return "fr-FR\n"
+
+    assert running_under_wsl({}, osrelease_path)
+    assert wsl_windows_locale_names(
+        {}, fake_runner, osrelease_path
+    ) == ["fr-FR"]
+    assert language_from_windows_locale(
+        translations,
+        environ={},
+        wsl_command_runner=fake_runner,
+        osrelease_path=osrelease_path,
+    ) == "fr"
 
 
 def test_logsim_detects_windows_language_before_wx_starts():

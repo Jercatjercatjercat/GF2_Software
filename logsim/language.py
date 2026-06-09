@@ -23,6 +23,16 @@ WINDOWS_PRIMARY_LANGUAGE_IDS = {
     0x0A: "es",
     0x0C: "fr",
 }
+LINUX_LANGUAGE_KEYS = ["Language", "LANGUAGE", "LC_MESSAGES", "LANG"]
+
+
+def supported_language_code(locale_name, supported_languages=None):
+    """Return a supported language code parsed from a locale name."""
+    supported_languages = set(supported_languages or [])
+    code = normalise_language_code(locale_name)
+    if code and (not supported_languages or code in supported_languages):
+        return code
+    return None
 
 
 def load_catalogue(path=CATALOGUE_PATH):
@@ -134,13 +144,151 @@ def language_from_python_locale(supported_languages=None, locale_module=None):
     return None
 
 
-def windows_locale_names_and_ids(windows_api=None):
+def running_under_wsl(environ=None, osrelease_path=None):
+    """Return True when the process appears to be running under WSL."""
+    if environ is None:
+        environ = os.environ
+    if environ.get("WSL_DISTRO_NAME") or environ.get("WSL_INTEROP"):
+        return True
+
+    if osrelease_path is None:
+        osrelease_path = Path("/proc/sys/kernel/osrelease")
+
+    try:
+        with open(osrelease_path, encoding="utf-8") as osrelease_file:
+            osrelease = osrelease_file.read().lower()
+    except OSError:
+        return False
+
+    return "microsoft" in osrelease or "wsl" in osrelease
+
+
+def wsl_windows_locale_names(environ=None, command_runner=None,
+                             osrelease_path=None):
+    """Return Windows UI locale names when launched from WSL."""
+    if not running_under_wsl(environ, osrelease_path):
+        return []
+
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$PSUICulture; (Get-UICulture).Name; "
+        "[System.Globalization.CultureInfo]::CurrentUICulture.Name",
+    ]
+
+    try:
+        if command_runner is None:
+            import subprocess
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+        else:
+            result = command_runner(command)
+    except (OSError, TypeError):
+        return []
+    except Exception:
+        return []
+
+    output = getattr(result, "stdout", result)
+    return [line.strip() for line in str(output).splitlines() if line.strip()]
+
+
+def linux_locale_config_paths(environ=None):
+    """Return likely Linux desktop locale configuration paths."""
+    if environ is None:
+        environ = os.environ
+        include_system_paths = True
+    else:
+        include_system_paths = False
+
+    paths = []
+    user_name = environ.get("USER") or environ.get("LOGNAME")
+    home_path = environ.get("HOME")
+    config_home = environ.get("XDG_CONFIG_HOME")
+
+    if user_name:
+        paths.append(Path("/var/lib/AccountsService/users") / user_name)
+    if home_path:
+        paths.append(Path(home_path) / ".pam_environment")
+    if config_home:
+        paths.append(Path(config_home) / "locale.conf")
+    elif home_path:
+        paths.append(Path(home_path) / ".config" / "locale.conf")
+    if include_system_paths:
+        paths.extend([Path("/etc/locale.conf"), Path("/etc/default/locale")])
+
+    return paths
+
+
+def locale_config_values(path):
+    """Return key/value pairs from a Linux locale-style config file."""
+    values = {}
+    try:
+        with open(path, encoding="utf-8") as config_file:
+            lines = config_file.readlines()
+    except OSError:
+        return values
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith("["):
+            continue
+
+        if " DEFAULT=" in line:
+            key, value = line.split(" DEFAULT=", 1)
+        elif " OVERRIDE=" in line:
+            key, value = line.split(" OVERRIDE=", 1)
+        elif "=" in line:
+            key, value = line.split("=", 1)
+        else:
+            continue
+
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        values.setdefault(key, value)
+
+    return values
+
+
+def language_from_linux_locale(supported_languages=None, environ=None,
+                               config_paths=None):
+    """Return the Linux desktop/account language, when configured."""
+    supported_languages = set(supported_languages or [])
+    if config_paths is None:
+        config_paths = linux_locale_config_paths(environ)
+
+    for path in config_paths:
+        values = locale_config_values(path)
+        for key in LINUX_LANGUAGE_KEYS:
+            code = supported_language_code(values.get(key),
+                                           supported_languages)
+            if code:
+                return code
+
+    return None
+
+
+def windows_locale_names_and_ids(windows_api=None, environ=None,
+                                 wsl_command_runner=None,
+                                 osrelease_path=None):
     """Return Windows locale names and language IDs, when available."""
     if windows_api is not None:
         return (
             list(windows_api.get_locale_names()),
             list(windows_api.get_language_ids()),
         )
+
+    wsl_locale_names = wsl_windows_locale_names(
+        environ, wsl_command_runner, osrelease_path
+    )
+    if wsl_locale_names:
+        return wsl_locale_names, []
 
     try:
         import ctypes
@@ -212,10 +360,17 @@ def windows_locale_names_and_ids(windows_api=None):
     return locale_names, language_ids
 
 
-def language_from_windows_locale(supported_languages=None, windows_api=None):
+def language_from_windows_locale(supported_languages=None, windows_api=None,
+                                 environ=None, wsl_command_runner=None,
+                                 osrelease_path=None):
     """Return the Windows account or display language, when available."""
     supported_languages = set(supported_languages or [])
-    locale_names, language_ids = windows_locale_names_and_ids(windows_api)
+    locale_names, language_ids = windows_locale_names_and_ids(
+        windows_api,
+        environ,
+        wsl_command_runner,
+        osrelease_path,
+    )
 
     for language_id in language_ids:
         try:
@@ -231,6 +386,13 @@ def language_from_windows_locale(supported_languages=None, windows_api=None):
         if code and (not supported_languages or code in supported_languages):
             return code
 
+    return None
+
+
+def non_default_language(language_code):
+    """Return the language code unless it is the English fallback."""
+    if language_code and language_code != DEFAULT_LANGUAGE:
+        return language_code
     return None
 
 
@@ -273,15 +435,34 @@ def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
 
 
 def choose_language(translations, wx_module=None, environ=None,
-                    locale_module=None, windows_api=None):
+                    locale_module=None, windows_api=None,
+                    linux_config_paths=None, wsl_command_runner=None,
+                    osrelease_path=None):
     """Choose the best available language for the GUI."""
     supported_languages = set(translations)
-    language_code = language_from_environment(environ, supported_languages)
+    environment_language = language_from_environment(
+        environ, supported_languages
+    )
+    language_code = non_default_language(environment_language)
     if language_code:
         return language_code
 
     language_code = language_from_windows_locale(
-        supported_languages, windows_api
+        supported_languages,
+        windows_api,
+        environ,
+        wsl_command_runner,
+        osrelease_path,
+    )
+    if language_code:
+        return language_code
+
+    language_code = language_from_wx_locale(wx_module, supported_languages)
+    if language_code:
+        return language_code
+
+    language_code = language_from_linux_locale(
+        supported_languages, environ, linux_config_paths
     )
     if language_code:
         return language_code
@@ -292,9 +473,8 @@ def choose_language(translations, wx_module=None, environ=None,
     if language_code:
         return language_code
 
-    language_code = language_from_wx_locale(wx_module, supported_languages)
-    if language_code:
-        return language_code
+    if environment_language:
+        return environment_language
 
     return DEFAULT_LANGUAGE
 
