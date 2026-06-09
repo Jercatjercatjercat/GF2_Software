@@ -97,6 +97,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_offset = 0
         self.scope_geometry = {}
         self.follow_latest_cycles = True
+        self.view_mode = "split"
+        self.last_scope_plot_width = 0
         self.dark_mode = False
         self.colour_blind_mode = False
         self.last_circuit_bounds = None
@@ -170,6 +172,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_first_row = 0
         self.scope_drag_mode = None
         self.follow_latest_cycles = False
+        self.view_mode = "split"
         self.reset_3d_trace_view()
         self.init = False
         self.Refresh()
@@ -178,6 +181,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Switch between conventional 2D and perspective 3D traces."""
         self.trace_display_3d = bool(enabled)
         self.trace_3d_drag_active = False
+        self.init = False
+        self.Refresh()
+
+    def set_view_mode(self, mode):
+        """Show both views split, or maximise the circuit or oscilloscope."""
+        if mode not in ("split", "circuit", "scope"):
+            mode = "split"
+        self.view_mode = mode
         self.init = False
         self.Refresh()
 
@@ -218,16 +229,37 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def zoom_scope(self, factor):
         """Zoom the oscilloscope time axis in or out."""
         self.scope_cycle_zoom = self.clamp(
-            self.scope_cycle_zoom * factor, 0.25, 4.0
+            self.scope_cycle_zoom * factor, 0.1, 4.0
         )
         self.follow_latest_cycles = False
+        if self.trace_display_3d:
+            self.trace_3d_zoom = self.clamp(
+                self.trace_3d_zoom * factor, 0.25, 4.0
+            )
         self.Refresh()
 
     def fit_scope(self):
-        """Zoom out to show as much oscilloscope history as possible."""
-        self.scope_cycle_zoom = 0.25
+        """Frame the whole oscilloscope so all of it is visible at once."""
         self.scope_first_cycle = 0
+        self.scope_first_row = 0
         self.follow_latest_cycles = False
+        if self.trace_display_3d:
+            # Hundreds of blocks are never legible in 3D, so reset to a
+            # readable time window and re-frame the perspective camera.
+            self.scope_cycle_zoom = 1.0
+            self.reset_3d_trace_view()
+            self.Refresh()
+            return
+        monitor_items = list(self.monitors.monitors_dictionary.items())
+        max_cycles = self.max_recorded_cycles(monitor_items)
+        plot_width = getattr(self, "last_scope_plot_width", 0)
+        if max_cycles > 0 and plot_width > 0:
+            target_cycle_width = plot_width / max_cycles
+            self.scope_cycle_zoom = self.clamp(
+                target_cycle_width / self.default_cycle_width, 0.02, 1.0
+            )
+        else:
+            self.scope_cycle_zoom = 0.25
         self.Refresh()
 
     def set_dark_mode(self, enabled):
@@ -347,39 +379,66 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         monitor_items = list(self.monitors.monitors_dictionary.items())
         circuit_bounds, scope_bounds = self.calculate_display_bounds(size)
 
-        self.last_circuit_bounds = circuit_bounds
         self.draw_canvas_grid(size)
-        self.draw_circuit_overview(circuit_bounds)
-        if self.trace_display_3d:
-            self.draw_3d_oscilloscope(scope_bounds, monitor_items)
-        else:
-            self.draw_oscilloscope(scope_bounds, monitor_items)
+        if circuit_bounds is not None:
+            self.last_circuit_bounds = circuit_bounds
+            self.draw_circuit_overview(circuit_bounds)
+        if scope_bounds is not None:
+            if self.trace_display_3d:
+                self.draw_3d_oscilloscope(scope_bounds, monitor_items)
+            else:
+                self.draw_oscilloscope(scope_bounds, monitor_items)
         self.finish_render(swap)
 
     def calculate_display_bounds(self, size):
-        """Return circuit and oscilloscope bounds with hard minima."""
+        """Return circuit and oscilloscope bounds for the active view mode."""
         available_width = max(1, size.width - self.canvas_horizontal_padding)
+        view_mode = getattr(self, "view_mode", "split")
+
+        if view_mode == "circuit":
+            return self.maximised_view_bounds(size, available_width), None
+        if view_mode == "scope":
+            return None, self.maximised_view_bounds(size, available_width)
+        return self.split_view_bounds(size, available_width)
+
+    def maximised_view_bounds(self, size, available_width):
+        """Return bounds that fill the canvas for a single maximised view."""
+        height = max(
+            self.min_scope_height,
+            size.height - self.canvas_top_margin - self.scope_y,
+        )
+        return (18, self.scope_y, available_width, height)
+
+    def split_view_bounds(self, size, available_width):
+        """Split the canvas so the oscilloscope fills the lower region.
+
+        The circuit overview is kept only as tall as its contents need so
+        the oscilloscope grows to use the remaining vertical space instead
+        of sitting in a short strip at the bottom of the window.
+        """
+        available = (
+            size.height - self.canvas_top_margin - self.scope_y
+            - self.scope_gap
+        )
+        available = max(
+            available, self.min_circuit_height + self.min_scope_height
+        )
         desired_circuit_height = max(
             self.estimate_circuit_height(), self.min_circuit_height
         )
-        available_for_circuit = (
-            size.height - self.canvas_top_margin - self.scope_y
-            - self.scope_gap - self.min_scope_height
+        circuit_cap = max(
+            self.min_circuit_height,
+            min(available - self.min_scope_height, int(available * 0.45)),
         )
         circuit_height = max(
             self.min_circuit_height,
-            min(desired_circuit_height, available_for_circuit),
+            min(desired_circuit_height, circuit_cap),
         )
-        circuit_y = self.scope_y + self.min_scope_height + self.scope_gap
-        if size.height >= (
-            self.scope_y + self.min_scope_height + self.scope_gap
-            + circuit_height + self.canvas_top_margin
-        ):
-            circuit_y = size.height - circuit_height - self.canvas_top_margin
+        scope_height = max(self.min_scope_height, available - circuit_height)
 
+        scope_bounds = (18, self.scope_y, available_width, scope_height)
+        circuit_y = self.scope_y + scope_height + self.scope_gap
         circuit_bounds = (18, circuit_y, available_width, circuit_height)
-        scope_bounds = (18, self.scope_y, available_width,
-                        self.min_scope_height)
         return circuit_bounds, scope_bounds
 
     def finish_render(self, swap=True):
@@ -949,6 +1008,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         plot_x = scope_x + label_width
         plot_y = scope_y + axis_height
         plot_width = scope_width - label_width - scroll_width - 20
+        self.last_scope_plot_width = plot_width
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
 
@@ -1075,6 +1135,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         plot_x = scope_x + label_width
         plot_y = scope_y + axis_height
         plot_width = scope_width - label_width - scroll_width - 20
+        self.last_scope_plot_width = plot_width
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
         if plot_width <= 0 or plot_height <= 0:
@@ -1170,14 +1231,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def draw_3d_scope_labels(self, label_x, plot_x, plot_y, plot_height,
                              monitor_items, first_row):
         """Draw readable row labels beside the 3D plot."""
-        row_gap = min(44, plot_height / max(len(monitor_items), 1))
+        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), _ = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
             row_mid = plot_y + plot_height - 18 - index * row_gap
-            colour_index = first_row + index
             colour = self.trace_colour_for_monitor(
-                device_id, output_id, colour_index
+                device_id, output_id,
+                self.signal_colour_index(device_id, output_id)
             )
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             self.render_text(
@@ -1188,6 +1249,55 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 "0", plot_x - 18, row_mid - 11,
                 self.theme_colour("subtle_text")
             )
+
+    def fit_3d_camera_distance(self, width, height, cycle_span, row_span,
+                               row_depth):
+        """Return a camera distance and far plane that frame the whole scene.
+
+        The rotated bounding box of the raised signal blocks is projected onto
+        the horizontal and vertical fields of view, so the entire 3D trace is
+        framed snugly at the current viewing angle without any part being
+        clipped off the edges of the panel.
+        """
+        half_fov_y = math.radians(35.0 / 2.0)
+        tan_y = math.tan(half_fov_y)
+        tan_x = tan_y * (width / max(height, 1))
+
+        half_width = cycle_span / 2.0
+        half_height = 9.0
+        half_depth = row_span / 2.0 + row_depth
+        rotate_x = math.radians(self.trace_3d_rotate_x)
+        rotate_y = math.radians(self.trace_3d_rotate_y)
+
+        max_x = max_y = max_z = 0.0
+        for sign_x in (-1.0, 1.0):
+            for sign_y in (-1.0, 1.0):
+                for sign_z in (-1.0, 1.0):
+                    corner = self.rotate_scene_corner(
+                        sign_x * half_width, sign_y * half_height,
+                        sign_z * half_depth, rotate_x, rotate_y
+                    )
+                    max_x = max(max_x, abs(corner[0]))
+                    max_y = max(max_y, abs(corner[1]))
+                    max_z = max(max_z, abs(corner[2]))
+
+        fit_distance = max(max_x / tan_x, max_y / tan_y) + max_z
+        fit_distance = max(fit_distance, 120.0)
+        camera_distance = fit_distance * 1.12 / max(self.trace_3d_zoom, 0.2)
+        far_plane = camera_distance + max_z + 200.0
+        return camera_distance, far_plane
+
+    def rotate_scene_corner(self, x_pos, y_pos, z_pos, rotate_x, rotate_y):
+        """Rotate a scene corner the way the 3D trace camera will view it."""
+        cos_y = math.cos(rotate_y)
+        sin_y = math.sin(rotate_y)
+        x_rot = x_pos * cos_y + z_pos * sin_y
+        z_rot = -x_pos * sin_y + z_pos * cos_y
+        cos_x = math.cos(rotate_x)
+        sin_x = math.sin(rotate_x)
+        y_rot = y_pos * cos_x - z_rot * sin_x
+        z_final = y_pos * sin_x + z_rot * cos_x
+        return x_rot, y_rot, z_final
 
     def draw_3d_trace_view(self, plot_x, plot_y, plot_width, plot_height,
                            monitor_items, first_cycle, cycle_count,
@@ -1213,8 +1323,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         row_depth = 8.5
         cycle_span = cycle_count * cycle_pitch
         row_span = max(row_count - 1, 0) * row_pitch
-        scene_span = max(cycle_span, row_span + 90.0, 160.0)
-        camera_distance = scene_span * 1.8 / max(self.trace_3d_zoom, 0.2)
+        camera_distance, far_plane = self.fit_3d_camera_distance(
+            width, height, cycle_span, row_span, row_depth
+        )
+        aspect = width / max(height, 1)
 
         try:
             GL.glViewport(x_pos, y_pos, width, height)
@@ -1226,7 +1338,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
             GL.glMatrixMode(GL.GL_PROJECTION)
             GL.glLoadIdentity()
-            GLU.gluPerspective(35.0, width / max(height, 1), 1.0, 6000.0)
+            GLU.gluPerspective(35.0, aspect, 1.0, far_plane)
 
             GL.glMatrixMode(GL.GL_MODELVIEW)
             GL.glLoadIdentity()
@@ -1246,9 +1358,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             for index, monitor_item in enumerate(monitor_items):
                 (device_id, output_id), signal_list = monitor_item
                 z_pos = -index * row_pitch
-                colour_index = first_row + index
                 colour = self.trace_colour_for_monitor(
-                    device_id, output_id, colour_index
+                    device_id, output_id,
+                    self.signal_colour_index(device_id, output_id)
                 )
                 visible_signals = self.visible_signal_window(
                     signal_list, first_cycle, cycle_count, use_blank
@@ -1459,20 +1571,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(plot_x + width, plot_y + row)
         GL.glEnd()
 
+    def scope_row_gap(self, plot_height, count):
+        """Return a row spacing that spreads waveforms over the plot height.
+
+        Few monitors in a tall oscilloscope would otherwise bunch up against
+        the top edge, so the rows are distributed down the plot and the gap is
+        capped to keep each waveform comfortably close to its neighbour.
+        """
+        gap = plot_height / max(count, 1)
+        return self.clamp(gap, self.row_height, 88)
+
     def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
                         monitor_items, first_cycle, cycle_count,
                         first_row):
         """Draw all monitored signal names and waveforms."""
-        row_gap = min(44, plot_height / max(len(monitor_items), 1))
+        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), signal_list = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
             row_mid = plot_y + plot_height - 18 - index * row_gap
             row_base = row_mid - self.high_offset / 2
 
-            colour_index = first_row + index
             colour = self.trace_colour_for_monitor(
-                device_id, output_id, colour_index
+                device_id, output_id,
+                self.signal_colour_index(device_id, output_id)
             )
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
@@ -1516,7 +1638,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def draw_empty_scope_rows(self, label_x, plot_x, plot_y, plot_height,
                               monitor_items, cycle_count, first_row):
         """Draw aligned monitor rows before any signal data is recorded."""
-        row_gap = min(44, plot_height / max(len(monitor_items), 1))
+        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
         blank_signals = [self.devices.BLANK] * cycle_count
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), _ = monitor_item
@@ -1524,9 +1646,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             row_mid = plot_y + plot_height - 18 - index * row_gap
             row_base = row_mid - self.high_offset / 2
 
-            colour_index = first_row + index
             colour = self.trace_colour_for_monitor(
-                device_id, output_id, colour_index
+                device_id, output_id,
+                self.signal_colour_index(device_id, output_id)
             )
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             self.draw_signal_level_scale(
@@ -1574,6 +1696,32 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if signal in [self.devices.LOW, self.devices.FALLING]:
             return low_y
         return None
+
+    def signal_colour_index(self, device_id, output_id):
+        """Return a palette index fixed to the signal's identity.
+
+        Indexing colours by the monitored signal rather than its current row
+        keeps every trace the same colour as other monitors are added or
+        removed.
+        """
+        order = self.signal_colour_order()
+        return order.get((device_id, output_id), len(order))
+
+    def signal_colour_order(self):
+        """Return cached colour indices for every output in the circuit.
+
+        The cache is keyed on the active devices object, so it is rebuilt
+        automatically whenever a new definition file replaces the circuit.
+        """
+        cache = getattr(self, "_signal_colour_cache", None)
+        if cache is None or cache[0] is not self.devices:
+            order = {}
+            for device in self.devices.devices_list:
+                for output_id in self.sorted_port_ids(device.outputs):
+                    order[(device.device_id, output_id)] = len(order)
+            cache = (self.devices, order)
+            self._signal_colour_cache = cache
+        return cache[1]
 
     def trace_colour_for_monitor(self, device_id, output_id, index):
         """Return a trace colour, with clocks highlighted in green."""
@@ -1849,11 +1997,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         event.Skip()
 
     def on_mouse(self, event):
-        """Handle panning and zooming with the mouse."""
+        """Handle scrolling and 3D rotation inside the circuit and scope.
+
+        The whole-canvas pan and zoom are intentionally disabled so the
+        layout stays locked in place; only the circuit scrollbars, the
+        oscilloscope scrollbars, and the 3D trace camera respond to the
+        mouse.
+        """
         size = self.GetClientSize()
         object_x = (event.GetX() - self.pan_x) / self.zoom
         object_y = (size.height - event.GetY() - self.pan_y) / self.zoom
-        old_zoom = self.zoom
 
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
@@ -1885,14 +2038,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.scope_drag_mode = None
             self.trace_3d_drag_active = False
 
-        if event.Dragging():
-            self.pan_x += event.GetX() - self.last_mouse_x
-            self.pan_y -= event.GetY() - self.last_mouse_y
-            self.last_mouse_x = event.GetX()
-            self.last_mouse_y = event.GetY()
-            self.init = False
-            self.Refresh()
-
         wheel_rotation = event.GetWheelRotation()
         if wheel_rotation != 0 and self.scroll_circuit_view(
             object_x, object_y, wheel_rotation
@@ -1911,23 +2056,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         ):
             self.Refresh()
             return
-
-        if wheel_rotation < 0:
-            self.zoom *= 1.0 + (
-                wheel_rotation / (20 * event.GetWheelDelta())
-            )
-            self.zoom = max(self.zoom, 0.2)
-        elif wheel_rotation > 0:
-            self.zoom /= 1.0 - (
-                wheel_rotation / (20 * event.GetWheelDelta())
-            )
-            self.zoom = min(self.zoom, 5.0)
-
-        if wheel_rotation != 0:
-            self.pan_x -= (self.zoom - old_zoom) * object_x
-            self.pan_y -= (self.zoom - old_zoom) * object_y
-            self.init = False
-            self.Refresh()
 
     def start_3d_trace_drag(self, x_pos, y_pos):
         """Start rotating or panning the 3D trace view when clicked."""
@@ -2215,7 +2343,8 @@ class Gui(wx.Frame):
         if translated_title == "window_title":
             translated_title = title
 
-        super().__init__(parent=None, title=translated_title, size=(1120, 760))
+        super().__init__(parent=None, title=translated_title,
+                         size=(1300, 860))
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
@@ -2292,6 +2421,7 @@ class Gui(wx.Frame):
         """Apply light or dark colours to wx controls and the canvas."""
         theme = self.gui_theme()
         self.SetBackgroundColour(theme["background"])
+        self.side_panel.SetBackgroundColour(theme["background"])
         self.canvas.set_dark_mode(self.dark_mode)
         self.canvas.set_colour_blind_mode(self.colour_blind_mode)
 
@@ -2299,7 +2429,8 @@ class Gui(wx.Frame):
             self.cycles_label, self.speed_label, self.switch_label,
             self.add_monitor_label, self.remove_monitor_label,
             self.circuit_zoom_label, self.scope_zoom_label,
-            self.trace_display_label, self.switch_box, self.monitor_box,
+            self.trace_display_label, self.maximise_label,
+            self.switch_box, self.monitor_box,
             self.view_box,
             self.readings_box, self.log_box,
         ]
@@ -2313,6 +2444,7 @@ class Gui(wx.Frame):
             self.circuit_zoom_out_button, self.circuit_fit_button,
             self.scope_zoom_in_button, self.scope_zoom_out_button,
             self.scope_fit_button, self.trace_display_button,
+            self.maximise_circuit_button, self.maximise_scope_button,
         ]
         fields = [
             self.cycles_spin, self.speed_slider, self.switch_choice,
@@ -2477,6 +2609,15 @@ class Gui(wx.Frame):
         self.trace_display_button = wx.ToggleButton(
             self, wx.ID_ANY, self.t("trace_display_3d")
         )
+        self.maximise_label = wx.StaticText(
+            self, wx.ID_ANY, self.t("maximise")
+        )
+        self.maximise_circuit_button = wx.ToggleButton(
+            self, wx.ID_ANY, self.t("maximise_circuit")
+        )
+        self.maximise_scope_button = wx.ToggleButton(
+            self, wx.ID_ANY, self.t("maximise_scope")
+        )
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
@@ -2487,11 +2628,20 @@ class Gui(wx.Frame):
         display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.switch_box = wx.StaticBox(self, label=self.t("switches"))
-        self.monitor_box = wx.StaticBox(self, label=self.t("monitors"))
-        self.view_box = wx.StaticBox(self, label=self.t("view"))
-        self.readings_box = wx.StaticBox(self, label=self.t("readings"))
-        self.log_box = wx.StaticBox(self, label=self.t("log"))
+        self.side_panel = wx.ScrolledWindow(self, style=wx.VSCROLL)
+        self.side_panel.SetScrollRate(0, 12)
+        self.side_panel.SetMinSize((288, 240))
+        self.switch_box = wx.StaticBox(
+            self.side_panel, label=self.t("switches")
+        )
+        self.monitor_box = wx.StaticBox(
+            self.side_panel, label=self.t("monitors")
+        )
+        self.view_box = wx.StaticBox(self.side_panel, label=self.t("view"))
+        self.readings_box = wx.StaticBox(
+            self.side_panel, label=self.t("readings")
+        )
+        self.log_box = wx.StaticBox(self.side_panel, label=self.t("log"))
         self.reparent_side_panel_controls()
         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
@@ -2561,6 +2711,12 @@ class Gui(wx.Frame):
         scope_zoom_sizer.Add(self.scope_zoom_in_button, 1,
                              wx.EXPAND | wx.RIGHT, 4)
         scope_zoom_sizer.Add(self.scope_fit_button, 1, wx.EXPAND)
+        maximise_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        maximise_sizer.Add(self.maximise_circuit_button, 1,
+                           wx.EXPAND | wx.RIGHT, 4)
+        maximise_sizer.Add(self.maximise_scope_button, 1, wx.EXPAND)
+        view_box.Add(self.maximise_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
+        view_box.Add(maximise_sizer, 0, wx.EXPAND | wx.ALL, 6)
         view_box.Add(self.circuit_zoom_label, 0,
                      wx.TOP | wx.LEFT | wx.RIGHT, 6)
         view_box.Add(circuit_zoom_sizer, 0, wx.EXPAND | wx.ALL, 6)
@@ -2581,8 +2737,10 @@ class Gui(wx.Frame):
 
         display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
 
+        self.side_panel.SetSizer(side_sizer)
+
         main_sizer.Add(display_sizer, 1, wx.EXPAND)
-        main_sizer.Add(side_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        main_sizer.Add(self.side_panel, 0, wx.EXPAND | wx.ALL, 6)
         root_sizer.Add(run_toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
         root_sizer.Add(file_toolbar_sizer, 0,
                        wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
@@ -2606,6 +2764,8 @@ class Gui(wx.Frame):
             control.Reparent(self.monitor_box)
 
         for control in [
+            self.maximise_label, self.maximise_circuit_button,
+            self.maximise_scope_button,
             self.circuit_zoom_label, self.circuit_zoom_in_button,
             self.circuit_zoom_out_button, self.circuit_fit_button,
             self.scope_zoom_label, self.scope_zoom_in_button,
@@ -2667,6 +2827,12 @@ class Gui(wx.Frame):
         self.trace_display_button.Bind(
             wx.EVT_TOGGLEBUTTON, self.on_trace_display_button
         )
+        self.maximise_circuit_button.Bind(
+            wx.EVT_TOGGLEBUTTON, self.on_maximise_circuit_button
+        )
+        self.maximise_scope_button.Bind(
+            wx.EVT_TOGGLEBUTTON, self.on_maximise_scope_button
+        )
 
     def on_circuit_zoom(self, factor):
         """Zoom the circuit overview and refresh the canvas."""
@@ -2696,6 +2862,34 @@ class Gui(wx.Frame):
             self.set_status(self.t("trace_display_3d_enabled"))
         else:
             self.set_status(self.t("trace_display_2d_enabled"))
+
+    def on_maximise_circuit_button(self, event):
+        """Maximise the circuit overview, or restore the split view."""
+        if self.maximise_circuit_button.GetValue():
+            self.maximise_scope_button.SetValue(False)
+            self.apply_view_mode("circuit")
+        else:
+            self.apply_view_mode("split")
+
+    def on_maximise_scope_button(self, event):
+        """Maximise the oscilloscope, or restore the split view."""
+        if self.maximise_scope_button.GetValue():
+            self.maximise_circuit_button.SetValue(False)
+            self.apply_view_mode("scope")
+        else:
+            self.apply_view_mode("split")
+
+    def apply_view_mode(self, mode):
+        """Switch the canvas layout and report the active view."""
+        self.maximise_circuit_button.SetValue(mode == "circuit")
+        self.maximise_scope_button.SetValue(mode == "scope")
+        self.canvas.set_view_mode(mode)
+        messages = {
+            "split": "view_mode_split",
+            "circuit": "view_mode_circuit",
+            "scope": "view_mode_scope",
+        }
+        self.set_status(self.t(messages[mode]))
 
     def on_menu(self, event):
         """Handle menu events."""
@@ -2838,6 +3032,9 @@ class Gui(wx.Frame):
         self.scope_fit_button.SetLabel(self.t("fit"))
         self.trace_display_label.SetLabel(self.t("trace_display"))
         self.trace_display_button.SetLabel(self.t("trace_display_3d"))
+        self.maximise_label.SetLabel(self.t("maximise"))
+        self.maximise_circuit_button.SetLabel(self.t("maximise_circuit"))
+        self.maximise_scope_button.SetLabel(self.t("maximise_scope"))
         self.canvas.set_translator(self.t)
         self.apply_theme()
         self.Layout()

@@ -277,11 +277,32 @@ def test_empty_scope_rows_draw_blank_aligned_traces():
     )
 
     assert labels == ["DATA_SW", "FINAL_TEST"]
-    assert colour_indexes == [4, 5]
+    # Colours are keyed on the signal identity (device order), not the row,
+    # so they stay fixed as monitors are added or removed.
+    assert colour_indexes == [0, 1]
     assert len(level_rows) == 2
     assert len(traces) == 2
     assert traces[0][2] == [devices.BLANK] * 5
     assert traces[1][2] == [devices.BLANK] * 5
+
+
+def test_signal_colour_index_is_stable_per_signal_identity():
+    """Test if colour indices follow device order and ignore monitor order."""
+    devices = FakeDevices(
+        [fake_device("A"), fake_device("B"), fake_device("C")],
+        {"A": "SIG_A", "B": "SIG_B", "C": "SIG_C"},
+    )
+    canvas = make_canvas(devices)
+
+    index_a = canvas.signal_colour_index("A", None)
+    index_b = canvas.signal_colour_index("B", None)
+    index_c = canvas.signal_colour_index("C", None)
+
+    # Each signal gets a distinct index fixed by device declaration order.
+    assert [index_a, index_b, index_c] == [0, 1, 2]
+    # Querying again (e.g. after monitors change) returns the same indices.
+    assert canvas.signal_colour_index("B", None) == index_b
+    assert canvas.signal_colour_index("C", None) == index_c
 
 
 def test_trace_colour_for_monitor_handles_accessibility_modes():
