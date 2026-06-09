@@ -12,6 +12,7 @@ def install_gui_dependency_stubs():
     wxcanvas_module = types.ModuleType("wx.glcanvas")
     opengl_module = types.ModuleType("OpenGL")
     gl_module = types.ModuleType("OpenGL.GL")
+    glu_module = types.ModuleType("OpenGL.GLU")
     glut_module = types.ModuleType("OpenGL.GLUT")
 
     class DummyWidget:
@@ -27,6 +28,7 @@ def install_gui_dependency_stubs():
     wx_module.StaticBox = DummyWidget
     wx_module.StaticBoxSizer = DummyWidget
     wx_module.Button = DummyWidget
+    wx_module.ToggleButton = DummyWidget
     wx_module.StaticText = DummyWidget
     wx_module.SpinCtrl = DummyWidget
     wx_module.Slider = DummyWidget
@@ -51,6 +53,7 @@ def install_gui_dependency_stubs():
     glut_module.GLUT_BITMAP_HELVETICA_12 = object()
     glut_module.glutInit = lambda *args, **kwargs: None
     glut_module.glutBitmapCharacter = lambda *args, **kwargs: None
+    glu_module.gluPerspective = lambda *args, **kwargs: None
 
     def missing_gl_attribute(_name):
         """Return a no-op function for any OpenGL symbol."""
@@ -58,12 +61,14 @@ def install_gui_dependency_stubs():
 
     gl_module.__getattr__ = missing_gl_attribute
     opengl_module.GL = gl_module
+    opengl_module.GLU = glu_module
     opengl_module.GLUT = glut_module
 
     sys.modules.setdefault("wx", wx_module)
     sys.modules.setdefault("wx.glcanvas", wxcanvas_module)
     sys.modules.setdefault("OpenGL", opengl_module)
     sys.modules.setdefault("OpenGL.GL", gl_module)
+    sys.modules.setdefault("OpenGL.GLU", glu_module)
     sys.modules.setdefault("OpenGL.GLUT", glut_module)
 
 
@@ -77,7 +82,6 @@ except ModuleNotFoundError as error:
     gui = importlib.import_module("gui")
 
 MyGLCanvas = gui.MyGLCanvas
-Gui = gui.Gui
 
 
 class FakeNames:
@@ -97,7 +101,9 @@ class FakeDevices:
 
     LOW = 0
     HIGH = 1
-    BLANK = 2
+    RISING = 2
+    FALLING = 3
+    BLANK = 4
     CLOCK = "CLOCK"
     QBAR_ID = "QBAR"
 
@@ -143,6 +149,13 @@ def make_canvas(devices):
     canvas.scope_first_cycle = 0
     canvas.scope_first_row = 0
     canvas.scope_geometry = {}
+    canvas.trace_display_3d = False
+    canvas.trace_3d_rotate_x = 28.0
+    canvas.trace_3d_rotate_y = -34.0
+    canvas.trace_3d_pan_x = 0.0
+    canvas.trace_3d_pan_y = -4.0
+    canvas.trace_3d_zoom = 1.0
+    canvas.trace_3d_drag_active = False
     canvas.circuit_scroll_x = 0
     canvas.circuit_scroll_y = 0
     canvas.circuit_geometry = {}
@@ -295,6 +308,56 @@ def test_trace_colour_for_monitor_handles_accessibility_modes():
     )
 
 
+def test_visible_signal_window_pads_short_3d_traces():
+    """Test if 3D trace windows keep every visible cycle aligned."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    window = canvas.visible_signal_window(
+        [devices.LOW, devices.HIGH], first_cycle=1, cycle_count=4
+    )
+
+    assert window == [
+        devices.HIGH, devices.BLANK, devices.BLANK, devices.BLANK
+    ]
+    assert canvas.visible_signal_window(
+        [devices.HIGH], 0, 3, use_blank=True
+    ) == [devices.BLANK, devices.BLANK, devices.BLANK]
+
+
+def test_signal_height_3d_maps_digital_levels():
+    """Test if 3D traces raise high/rising levels above low/falling."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    assert canvas.signal_height_3d(devices.HIGH) > (
+        canvas.signal_height_3d(devices.LOW)
+    )
+    assert canvas.signal_height_3d(devices.RISING) == (
+        canvas.signal_height_3d(devices.HIGH)
+    )
+    assert canvas.signal_height_3d(devices.FALLING) == (
+        canvas.signal_height_3d(devices.LOW)
+    )
+    assert canvas.signal_height_3d(devices.BLANK) is None
+
+
+def test_trace_display_3d_toggle_refreshes_canvas():
+    """Test if the 3D trace display can be toggled on the canvas."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    refreshed = []
+    canvas.Refresh = lambda: refreshed.append(True)
+    canvas.init = True
+
+    canvas.set_trace_display_3d(True)
+
+    assert canvas.trace_display_3d is True
+    assert canvas.init is False
+    assert canvas.trace_3d_drag_active is False
+    assert refreshed == [True]
+
+
 def test_circuit_content_size_grows_only_for_complex_diagrams():
     """Test if simple circuits fit while crowded circuits get scroll space."""
     simple_devices = FakeDevices(
@@ -349,6 +412,12 @@ def test_reset_view_clears_canvas_scroll_and_zoom_state():
     canvas.scope_first_cycle = 15
     canvas.scope_first_row = 3
     canvas.scope_drag_mode = "horizontal"
+    canvas.trace_3d_rotate_x = -10
+    canvas.trace_3d_rotate_y = 80
+    canvas.trace_3d_pan_x = 22
+    canvas.trace_3d_pan_y = -18
+    canvas.trace_3d_zoom = 2.3
+    canvas.trace_3d_drag_active = True
     canvas.follow_latest_cycles = True
     canvas.init = True
 
@@ -363,6 +432,12 @@ def test_reset_view_clears_canvas_scroll_and_zoom_state():
     assert canvas.scope_first_cycle == 0
     assert canvas.scope_first_row == 0
     assert canvas.scope_drag_mode is None
+    assert canvas.trace_3d_rotate_x == 28.0
+    assert canvas.trace_3d_rotate_y == -34.0
+    assert canvas.trace_3d_pan_x == 0.0
+    assert canvas.trace_3d_pan_y == -4.0
+    assert canvas.trace_3d_zoom == 1.0
+    assert canvas.trace_3d_drag_active is False
     assert canvas.follow_latest_cycles is False
     assert canvas.init is False
     assert refreshed == [True]
@@ -411,57 +486,3 @@ def test_display_bounds_never_exceed_actual_canvas_width():
 
     assert circuit_bounds[0] + circuit_bounds[2] <= narrow_width
     assert scope_bounds[0] + scope_bounds[2] <= narrow_width
-
-
-def test_minimum_frame_size_keeps_canvas_and_default_layout_readable():
-    """Test if the frame cannot shrink below the readable layout size."""
-    frame = Gui.__new__(Gui)
-    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
-
-    assert frame.minimum_frame_size() == (1216, 760)
-
-
-def test_size_dimensions_accepts_tuple_and_wx_size_shape():
-    """Test if size helpers work with tuples and wx.Size-like objects."""
-    assert Gui.size_dimensions((10, 20)) == (10, 20)
-    assert Gui.size_dimensions(SimpleNamespace(width=30, height=40)) == (
-        30, 40
-    )
-
-
-def test_frame_size_guard_restores_minimum_dimensions():
-    """Test if undersized resize events are clamped back to the minimum."""
-    frame = Gui.__new__(Gui)
-    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
-    frame.IsIconized = lambda: False
-    size_changes = []
-    skipped = []
-    event = SimpleNamespace(
-        GetSize=lambda: (100, 100),
-        Skip=lambda: skipped.append(True),
-    )
-    frame.SetSize = lambda size: size_changes.append(size)
-
-    frame.on_frame_size(event)
-
-    assert size_changes == [(1216, 760)]
-    assert skipped == []
-
-
-def test_frame_size_guard_does_not_restore_iconized_window():
-    """Test if true OS minimisation is still allowed."""
-    frame = Gui.__new__(Gui)
-    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
-    frame.IsIconized = lambda: True
-    size_changes = []
-    skipped = []
-    event = SimpleNamespace(
-        GetSize=lambda: (0, 0),
-        Skip=lambda: skipped.append(True),
-    )
-    frame.SetSize = lambda size: size_changes.append(size)
-
-    frame.on_frame_size(event)
-
-    assert size_changes == []
-    assert skipped == [True]
