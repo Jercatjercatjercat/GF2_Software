@@ -5,8 +5,10 @@ from types import SimpleNamespace
 from logsim import detect_startup_language
 from language import (
     choose_language,
+    initialise_wx_locale,
     language_from_environment,
     language_from_python_locale,
+    language_from_wx_locale,
     language_from_windows_locale,
     load_language_names,
     load_translations,
@@ -74,9 +76,25 @@ def test_choose_language_uses_python_account_locale_when_env_unset():
             """Return a fake account/default locale."""
             return "es_ES", "UTF-8"
 
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
     assert language_from_python_locale(translations, FakeLocaleModule) == "es"
     assert choose_language(
-        translations, environ={}, locale_module=FakeLocaleModule
+        translations,
+        environ={},
+        locale_module=FakeLocaleModule,
+        windows_api=NoWindowsApi,
     ) == "es"
 
 
@@ -120,7 +138,20 @@ def test_logsim_detects_startup_language_before_wx_starts():
             """Return a fake account/default locale."""
             return "es_ES", "UTF-8"
 
-    assert detect_startup_language({}, FakeLocaleModule) == "es"
+    class NoWindowsApi:
+        """Small stand-in for unavailable Windows locale APIs."""
+
+        @staticmethod
+        def get_locale_names():
+            """Return no fake Windows locale names."""
+            return []
+
+        @staticmethod
+        def get_language_ids():
+            """Return no fake Windows language IDs."""
+            return []
+
+    assert detect_startup_language({}, FakeLocaleModule, NoWindowsApi) == "es"
 
 
 def test_choose_language_uses_windows_display_language():
@@ -319,6 +350,90 @@ def test_choose_language_uses_wx_account_locale_when_env_unset():
         locale_module=NoLocaleModule,
         windows_api=NoWindowsApi,
     ) == "fr"
+
+
+def test_wx_locale_detection_does_not_initialise_locale_object():
+    """Test if wx metadata detection avoids Linux locale warnings."""
+
+    class FakeLocale:
+        """Small stand-in for wx.Locale that must not be instantiated."""
+
+        def __init__(self):
+            """Fail if detection tries to create a wx.Locale object."""
+            raise AssertionError("wx.Locale should not be initialised")
+
+        @staticmethod
+        def GetSystemLanguage():
+            """Return a fake wx language ID."""
+            return 1
+
+        @staticmethod
+        def GetLanguageInfo(_language_id):
+            """Return no useful desktop language information."""
+            return None
+
+    fake_wx = SimpleNamespace(Locale=FakeLocale)
+
+    assert language_from_wx_locale(fake_wx, {"en", "es"}) is None
+
+
+def test_initialise_wx_locale_skips_english_default():
+    """Test if English avoids unnecessary OS locale initialisation."""
+
+    class FakeLocale:
+        """Small stand-in for wx.Locale that must not be instantiated."""
+
+        def __init__(self):
+            """Fail if English tries to create a wx.Locale object."""
+            raise AssertionError("English should not initialise wx.Locale")
+
+    fake_wx = SimpleNamespace(Locale=FakeLocale, LANGUAGE_ENGLISH=1)
+
+    assert initialise_wx_locale(fake_wx, "en") is None
+
+
+def test_initialise_wx_locale_skips_unavailable_linux_locale():
+    """Test if unavailable OS locales are ignored quietly."""
+
+    class FakeLocale:
+        """Small stand-in for wx.Locale that must not be instantiated."""
+
+        @staticmethod
+        def IsAvailable(_language_id):
+            """Return that the requested locale is unavailable."""
+            return False
+
+        def __init__(self):
+            """Fail if unavailable locales try to initialise wx.Locale."""
+            raise AssertionError("Unavailable locale should not initialise")
+
+    fake_wx = SimpleNamespace(Locale=FakeLocale, LANGUAGE_SPANISH=2)
+
+    assert initialise_wx_locale(fake_wx, "es") is None
+
+
+def test_initialise_wx_locale_uses_available_non_english_locale():
+    """Test if available non-English locales are initialised."""
+
+    class FakeLocale:
+        """Small stand-in for wx.Locale with availability metadata."""
+
+        initialised_language_id = None
+
+        @staticmethod
+        def IsAvailable(_language_id):
+            """Return that the requested locale is available."""
+            return True
+
+        def Init(self, language_id):
+            """Record the language ID used for locale initialisation."""
+            FakeLocale.initialised_language_id = language_id
+            return True
+
+    fake_wx = SimpleNamespace(Locale=FakeLocale, LANGUAGE_SPANISH=2)
+
+    assert initialise_wx_locale(fake_wx, "es") is not None
+    assert FakeLocale.initialised_language_id == 2
 
 
 def test_translate_falls_back_to_english():

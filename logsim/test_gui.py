@@ -77,6 +77,7 @@ except ModuleNotFoundError as error:
     gui = importlib.import_module("gui")
 
 MyGLCanvas = gui.MyGLCanvas
+Gui = gui.Gui
 
 
 class FakeNames:
@@ -410,3 +411,57 @@ def test_display_bounds_never_exceed_actual_canvas_width():
 
     assert circuit_bounds[0] + circuit_bounds[2] <= narrow_width
     assert scope_bounds[0] + scope_bounds[2] <= narrow_width
+
+
+def test_minimum_frame_size_keeps_canvas_and_default_layout_readable():
+    """Test if the frame cannot shrink below the readable layout size."""
+    frame = Gui.__new__(Gui)
+    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
+
+    assert frame.minimum_frame_size() == (1216, 760)
+
+
+def test_size_dimensions_accepts_tuple_and_wx_size_shape():
+    """Test if size helpers work with tuples and wx.Size-like objects."""
+    assert Gui.size_dimensions((10, 20)) == (10, 20)
+    assert Gui.size_dimensions(SimpleNamespace(width=30, height=40)) == (
+        30, 40
+    )
+
+
+def test_frame_size_guard_restores_minimum_dimensions():
+    """Test if undersized resize events are clamped back to the minimum."""
+    frame = Gui.__new__(Gui)
+    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
+    frame.IsIconized = lambda: False
+    size_changes = []
+    skipped = []
+    event = SimpleNamespace(
+        GetSize=lambda: (100, 100),
+        Skip=lambda: skipped.append(True),
+    )
+    frame.SetSize = lambda size: size_changes.append(size)
+
+    frame.on_frame_size(event)
+
+    assert size_changes == [(1216, 760)]
+    assert skipped == []
+
+
+def test_frame_size_guard_does_not_restore_iconized_window():
+    """Test if true OS minimisation is still allowed."""
+    frame = Gui.__new__(Gui)
+    frame.canvas = SimpleNamespace(minimum_visual_size=lambda: (796, 546))
+    frame.IsIconized = lambda: True
+    size_changes = []
+    skipped = []
+    event = SimpleNamespace(
+        GetSize=lambda: (0, 0),
+        Skip=lambda: skipped.append(True),
+    )
+    frame.SetSize = lambda size: size_changes.append(size)
+
+    frame.on_frame_size(event)
+
+    assert size_changes == []
+    assert skipped == [True]

@@ -89,7 +89,7 @@ def language_from_environment(environ=None, supported_languages=None):
 
 
 def language_from_wx_locale(wx_module, supported_languages=None):
-    """Return the desktop/account language reported by wx.Locale."""
+    """Return the desktop/account language reported by wx.Locale metadata."""
     if wx_module is None or not hasattr(wx_module, "Locale"):
         return None
 
@@ -106,16 +106,6 @@ def language_from_wx_locale(wx_module, supported_languages=None):
         if code and (not supported_languages or code in supported_languages):
             return code
 
-    try:
-        locale_object = wx_module.Locale()
-        default_language = getattr(wx_module, "LANGUAGE_DEFAULT", -1)
-        locale_object.Init(default_language)
-        code = normalise_language_code(locale_object.GetCanonicalName())
-    except (AttributeError, TypeError, RuntimeError):
-        return None
-
-    if code and (not supported_languages or code in supported_languages):
-        return code
     return None
 
 
@@ -263,10 +253,19 @@ def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
     """Initialise and return a wx.Locale object for this application."""
     if wx_module is None or not hasattr(wx_module, "Locale"):
         return None
+    if language_code == DEFAULT_LANGUAGE:
+        return None
 
     try:
+        language_id = wx_language_id(wx_module, language_code)
+        if (
+            hasattr(wx_module.Locale, "IsAvailable")
+            and not wx_module.Locale.IsAvailable(language_id)
+        ):
+            return None
         locale_object = wx_module.Locale()
-        locale_object.Init(wx_language_id(wx_module, language_code))
+        if not locale_object.Init(language_id):
+            return None
     except (AttributeError, TypeError, RuntimeError):
         return None
 

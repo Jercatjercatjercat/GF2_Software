@@ -1710,6 +1710,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 class Gui(wx.Frame):
     """Configure the main GUI window and widgets."""
 
+    default_frame_size = (1120, 760)
+    frame_minimum_padding = (420, 170)
+
     def __init__(self, title, path, names, devices, network, monitors,
                  initial_language=None):
         """Initialise widgets, controller, and layout."""
@@ -1724,7 +1727,11 @@ class Gui(wx.Frame):
         if translated_title == "window_title":
             translated_title = title
 
-        super().__init__(parent=None, title=translated_title, size=(1120, 760))
+        super().__init__(
+            parent=None,
+            title=translated_title,
+            size=self.default_frame_size,
+        )
         self.SetBackgroundColour(wx.Colour(245, 247, 250))
 
         self.path = path
@@ -1745,9 +1752,36 @@ class Gui(wx.Frame):
         self.remember_default_monitors()
         self.refresh_choices()
         self.set_status(self.format_text("loaded_file", path=path))
+        self.apply_minimum_frame_size()
 
+    def minimum_frame_size(self):
+        """Return the smallest frame size that keeps the layout readable."""
         min_canvas_width, min_canvas_height = self.canvas.minimum_visual_size()
-        self.SetSizeHints(min_canvas_width + 420, min_canvas_height + 170)
+        min_width = min_canvas_width + self.frame_minimum_padding[0]
+        min_height = min_canvas_height + self.frame_minimum_padding[1]
+        min_width = max(min_width, self.default_frame_size[0])
+        min_height = max(min_height, self.default_frame_size[1])
+        return min_width, min_height
+
+    @staticmethod
+    def size_dimensions(size):
+        """Return width and height from either a wx.Size or a tuple."""
+        if hasattr(size, "width"):
+            return size.width, size.height
+        return size
+
+    def apply_minimum_frame_size(self):
+        """Prevent wxGTK from squeezing child controls below usable sizes."""
+        min_width, min_height = self.minimum_frame_size()
+        min_size = (min_width, min_height)
+        self.SetMinSize(min_size)
+        self.SetSizeHints(min_width, min_height)
+
+        current_width, current_height = self.size_dimensions(self.GetSize())
+        target_width = max(current_width, min_width)
+        target_height = max(current_height, min_height)
+        if (target_width, target_height) != (current_width, current_height):
+            self.SetSize((target_width, target_height))
 
     def build_translations(self):
         """Return UI label translations keyed by language code."""
@@ -1929,6 +1963,8 @@ class Gui(wx.Frame):
         )
         self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
         self.canvas.SetMinSize(self.canvas.minimum_visual_size())
+        self.cycles_spin.SetMinSize((130, -1))
+        self.speed_slider.SetMinSize((260, -1))
         self.readings_list.SetMinSize((230, 100))
         self.log_text.SetMinSize((230, 84))
 
@@ -1979,6 +2015,9 @@ class Gui(wx.Frame):
         self.scope_zoom_in_button = wx.Button(self, wx.ID_ANY, "+")
         self.scope_zoom_out_button = wx.Button(self, wx.ID_ANY, "-")
         self.scope_fit_button = wx.Button(self, wx.ID_ANY, self.t("fit"))
+        self.switch_choice.SetMinSize((230, -1))
+        self.add_monitor_choice.SetMinSize((230, -1))
+        self.remove_monitor_choice.SetMinSize((230, -1))
 
     def configure_layout(self):
         """Arrange canvas and controls in sizers."""
@@ -2120,6 +2159,7 @@ class Gui(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_menu)
         self.Bind(wx.EVT_TIMER, self.on_auto_timer, self.auto_timer)
         self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.Bind(wx.EVT_SIZE, self.on_frame_size)
         self.run_button.Bind(wx.EVT_BUTTON, self.on_run_button)
         self.continue_button.Bind(wx.EVT_BUTTON, self.on_continue_button)
         self.step_button.Bind(wx.EVT_BUTTON, self.on_step_button)
@@ -2162,6 +2202,20 @@ class Gui(wx.Frame):
         self.scope_fit_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_scope_fit()
         )
+
+    def on_frame_size(self, event):
+        """Keep the frame large enough for GTK widgets and canvas regions."""
+        if self.IsIconized():
+            event.Skip()
+            return
+
+        width, height = self.size_dimensions(event.GetSize())
+        min_width, min_height = self.minimum_frame_size()
+        if width < min_width or height < min_height:
+            self.SetSize((max(width, min_width), max(height, min_height)))
+            return
+
+        event.Skip()
 
     def on_circuit_zoom(self, factor):
         """Zoom the circuit overview and refresh the canvas."""
