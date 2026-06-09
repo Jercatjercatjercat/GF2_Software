@@ -141,6 +141,9 @@ class Parser:
             elif self.symbol.type == self.scanner.INVALID:
                 self._report_invalid_symbol()
                 self._recover_device_declaration()
+            elif self.symbol.type == self.scanner.COLON:
+                self._report_syntax_error("expected device name before ':'")
+                self._recover_device_declaration()
             else:
                 self._report_syntax_error("expected device declaration")
                 self._recover_device_declaration()

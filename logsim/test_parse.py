@@ -571,6 +571,28 @@ def test_parse_reports_numeric_device_name_without_section_cascade(
     assert "expected MONITOR" not in output
 
 
+def test_parse_reports_missing_device_name_before_colon(tmp_path, capsys):
+    """Test if a declaration starting with ':' gets a clear error."""
+    parser, names, devices, network, monitors = make_parser(
+        tmp_path,
+        """DEVICES {
+            : SWITCH(0);
+        }
+        CONNECT {
+        }
+        MONITOR {
+        };
+        END;
+        """,
+    )
+
+    assert not parser.parse_network()
+    output = capsys.readouterr().out
+    assert "expected device name before ':'" in output
+    assert "expected device declaration" not in output
+    assert "            : SWITCH(0);\n            ^" in output
+
+
 def test_parse_reports_missing_comma_in_monitor_list(tmp_path, capsys):
     """Test recovery from a missing comma between monitor signals."""
     parser, names, devices, network, monitors = make_parser(
