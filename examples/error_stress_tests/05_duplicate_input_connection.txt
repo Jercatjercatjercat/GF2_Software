@@ -1,0 +1,18 @@
+# Stress test 05: two outputs connected to the same input
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(1);
+    G1 : OR(1);
+}
+
+CONNECT {
+    A -> G1.I1;
+    B -> G1.I1;
+}
+
+MONITOR {
+    G1
+};
+
+END;

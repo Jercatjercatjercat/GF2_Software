@@ -1,0 +1,13 @@
+# Stress test 02: device name starts with a number
+
+DEVICES {
+    123A : SWITCH(0);
+}
+
+CONNECT {
+}
+
+MONITOR {
+};
+
+END;

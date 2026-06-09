@@ -1,0 +1,18 @@
+# Stress test 04: declared gate inputs left unconnected
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(1);
+    WIDE_GATE : AND(4);
+}
+
+CONNECT {
+    A -> WIDE_GATE.I1;
+    B -> WIDE_GATE.I3;
+}
+
+MONITOR {
+    WIDE_GATE
+};
+
+END;

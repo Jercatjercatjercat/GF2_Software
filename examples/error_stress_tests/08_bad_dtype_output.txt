@@ -1,0 +1,24 @@
+# Stress test 08: ambiguous DTYPE output without .Q or .QBAR
+
+DEVICES {
+    CLK_DEV : CLOCK(2);
+    DATA_SW : SWITCH(1);
+    SET_SW : SWITCH(0);
+    CLEAR_SW : SWITCH(0);
+    FF1 : DTYPE;
+    G1 : AND(1);
+}
+
+CONNECT {
+    CLK_DEV -> FF1.CLK;
+    DATA_SW -> FF1.DATA;
+    SET_SW -> FF1.SET;
+    CLEAR_SW -> FF1.CLEAR;
+    FF1 -> G1.I1;
+}
+
+MONITOR {
+    FF1
+};
+
+END;

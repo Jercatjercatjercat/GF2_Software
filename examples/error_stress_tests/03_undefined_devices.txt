@@ -1,0 +1,18 @@
+# Stress test 03: undefined devices in connection source, destination, and monitor
+
+DEVICES {
+    A : SWITCH(0);
+    G1 : AND(1);
+}
+
+CONNECT {
+    MISSING_SOURCE -> G1.I1;
+    A -> MISSING_DEST.I1;
+}
+
+MONITOR {
+    G1,
+    MISSING_MONITOR
+};
+
+END;
