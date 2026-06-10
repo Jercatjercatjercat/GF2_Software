@@ -3223,7 +3223,7 @@ class Gui(wx.Frame):
         self.canvas.set_colour_blind_mode(self.colour_blind_mode)
 
         text_controls = [
-            self.cycles_label, self.speed_label, self.switch_label,
+            self.cycles_label, self.speed_label,
             self.add_monitor_label, self.remove_monitor_label,
             self.fit_label,
             self.trace_display_label, self.maximise_label,
@@ -3233,9 +3233,7 @@ class Gui(wx.Frame):
         ]
         buttons = [
             self.run_button, self.continue_button, self.step_button,
-            self.auto_run_button, self.open_button, self.save_button,
-            self.export_circuit_button, self.export_scope_button,
-            self.settings_button, self.help_button, self.set_switch_button,
+            self.auto_run_button, self.help_button, self.set_switch_button,
             self.add_monitor_button, self.remove_monitor_button,
             self.reset_view_button, self.circuit_fit_button,
             self.scope_fit_button, self.trace_display_button,
@@ -3265,12 +3263,13 @@ class Gui(wx.Frame):
         self.Layout()
 
     def configure_menu(self):
-        """Create the File and Help menus."""
+        """Create the File, Settings, and Help menus."""
         self.help_menu_id = wx.NewIdRef()
         self.export_circuit_menu_id = wx.NewIdRef()
         self.export_scope_menu_id = wx.NewIdRef()
 
         self.file_menu = wx.Menu()
+        self.settings_menu = wx.Menu()
         self.help_menu = wx.Menu()
         self.menu_bar = wx.MenuBar()
         self.open_menu_item = self.file_menu.Append(
@@ -3290,6 +3289,26 @@ class Gui(wx.Frame):
             wx.ID_EXIT, self.t("menu_exit")
         )
 
+        self.language_menu = wx.Menu()
+        self.language_menu_codes = {}
+        for language_code, language_name in self.language_names.items():
+            item = self.language_menu.AppendRadioItem(
+                wx.ID_ANY, language_name
+            )
+            if language_code == self.current_language:
+                item.Check(True)
+            self.language_menu_codes[item.GetId()] = language_code
+        self.language_menu_item = self.settings_menu.AppendSubMenu(
+            self.language_menu, self.t("language")
+        )
+        self.settings_menu.AppendSeparator()
+        self.dark_mode_menu_item = self.settings_menu.AppendCheckItem(
+            wx.ID_ANY, self.t("dark_mode")
+        )
+        self.colour_blind_menu_item = self.settings_menu.AppendCheckItem(
+            wx.ID_ANY, self.t("colour_blind_mode")
+        )
+
         self.help_menu_item = self.help_menu.Append(
             self.help_menu_id, self.t("menu_help_item")
         )
@@ -3298,6 +3317,7 @@ class Gui(wx.Frame):
         )
 
         self.menu_bar.Append(self.file_menu, self.t("menu_file"))
+        self.menu_bar.Append(self.settings_menu, self.t("settings"))
         self.menu_bar.Append(self.help_menu, self.t("menu_help"))
         self.SetMenuBar(self.menu_bar)
 
@@ -3321,17 +3341,6 @@ class Gui(wx.Frame):
         self.speed_slider = wx.Slider(
             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
         )
-        self.open_button = wx.Button(self, wx.ID_ANY, self.t("open_file"))
-        self.save_button = wx.Button(self, wx.ID_ANY, self.t("save_file"))
-        self.export_circuit_button = wx.Button(
-            self, wx.ID_ANY, self.t("export_circuit")
-        )
-        self.export_scope_button = wx.Button(
-            self, wx.ID_ANY, self.t("export_scope")
-        )
-        self.settings_button = wx.Button(
-            self, wx.ID_ANY, self.t("settings")
-        )
         self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
         self.log_entries = []
@@ -3350,9 +3359,8 @@ class Gui(wx.Frame):
         self.log_text.SetBackgroundColour(wx.Colour(250, 251, 253))
         self.canvas.SetMinSize(self.canvas.minimum_visual_size())
         self.readings_list.SetMinSize((230, 100))
-        self.log_text.SetMinSize((230, 84))
+        self.log_text.SetMinSize((230, 120))
 
-        self.switch_label = wx.StaticText(self, wx.ID_ANY, self.t("switch"))
         self.switch_choice = wx.Choice(self, wx.ID_ANY)
         self.switch_value = wx.RadioBox(
             self,
@@ -3415,7 +3423,6 @@ class Gui(wx.Frame):
         """Arrange canvas and controls in sizers."""
         root_sizer = wx.BoxSizer(wx.VERTICAL)
         run_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        file_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
         main_sizer = wx.BoxSizer(wx.HORIZONTAL)
         display_sizer = wx.BoxSizer(wx.VERTICAL)
         side_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -3459,36 +3466,32 @@ class Gui(wx.Frame):
             self.speed_slider, 1,
             wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10
         )
+        run_toolbar_sizer.Add(self.help_button, 0,
+                              wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
-        file_toolbar_sizer.AddStretchSpacer()
-        file_toolbar_sizer.Add(self.open_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.save_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.export_circuit_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.export_scope_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.settings_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
-        file_toolbar_sizer.Add(self.help_button, 0,
-                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
-
-        switch_box.Add(self.switch_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
-        switch_box.Add(self.switch_choice, 0, wx.EXPAND | wx.ALL, 6)
-        switch_box.Add(self.switch_value, 0, wx.EXPAND | wx.ALL, 6)
+        switch_row = wx.BoxSizer(wx.HORIZONTAL)
+        switch_row.Add(self.switch_choice, 1,
+                       wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        switch_row.Add(self.switch_value, 0, wx.EXPAND)
+        switch_box.Add(switch_row, 0, wx.EXPAND | wx.ALL, 6)
         switch_box.Add(self.set_switch_button, 0, wx.EXPAND | wx.ALL, 6)
 
+        add_monitor_row = wx.BoxSizer(wx.HORIZONTAL)
+        add_monitor_row.Add(self.add_monitor_choice, 1,
+                            wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        add_monitor_row.Add(self.add_monitor_button, 0,
+                            wx.ALIGN_CENTER_VERTICAL)
+        remove_monitor_row = wx.BoxSizer(wx.HORIZONTAL)
+        remove_monitor_row.Add(self.remove_monitor_choice, 1,
+                               wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
+        remove_monitor_row.Add(self.remove_monitor_button, 0,
+                               wx.ALIGN_CENTER_VERTICAL)
         monitor_box.Add(self.add_monitor_label, 0,
                         wx.TOP | wx.LEFT | wx.RIGHT, 6)
-        monitor_box.Add(self.add_monitor_choice, 0, wx.EXPAND | wx.ALL, 6)
-        monitor_box.Add(self.add_monitor_button, 0, wx.EXPAND | wx.ALL, 6)
+        monitor_box.Add(add_monitor_row, 0, wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.remove_monitor_label, 0,
                         wx.TOP | wx.LEFT | wx.RIGHT, 6)
-        monitor_box.Add(self.remove_monitor_choice, 0,
-                        wx.EXPAND | wx.ALL, 6)
-        monitor_box.Add(self.remove_monitor_button, 0,
-                        wx.EXPAND | wx.ALL, 6)
+        monitor_box.Add(remove_monitor_row, 0, wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
 
         maximise_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -3503,9 +3506,9 @@ class Gui(wx.Frame):
         view_box.Add(self.fit_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         view_box.Add(fit_sizer, 0, wx.EXPAND | wx.ALL, 6)
         trace_3d_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        trace_3d_sizer.Add(self.trace_display_button, 1,
+        trace_3d_sizer.Add(self.circuit_3d_button, 1,
                            wx.EXPAND | wx.RIGHT, 4)
-        trace_3d_sizer.Add(self.circuit_3d_button, 1, wx.EXPAND)
+        trace_3d_sizer.Add(self.trace_display_button, 1, wx.EXPAND)
         view_box.Add(self.trace_display_label, 0,
                      wx.LEFT | wx.RIGHT, 6)
         view_box.Add(trace_3d_sizer, 0, wx.EXPAND | wx.ALL, 6)
@@ -3517,7 +3520,7 @@ class Gui(wx.Frame):
         side_sizer.Add(monitor_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(view_box, 0, wx.EXPAND | wx.ALL, 6)
         side_sizer.Add(readings_box, 1, wx.EXPAND | wx.ALL, 6)
-        side_sizer.Add(log_box, 0, wx.EXPAND | wx.ALL, 6)
+        side_sizer.Add(log_box, 1, wx.EXPAND | wx.ALL, 6)
 
         display_sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 6)
 
@@ -3526,15 +3529,13 @@ class Gui(wx.Frame):
         main_sizer.Add(display_sizer, 1, wx.EXPAND)
         main_sizer.Add(self.side_panel, 0, wx.EXPAND | wx.ALL, 6)
         root_sizer.Add(run_toolbar_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        root_sizer.Add(file_toolbar_sizer, 0,
-                       wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 6)
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
         self.SetSizer(root_sizer)
 
     def reparent_side_panel_controls(self):
         """Make side-panel widgets children of their native group boxes."""
         for control in [
-            self.switch_label, self.switch_choice, self.switch_value,
+            self.switch_choice, self.switch_value,
             self.set_switch_button,
         ]:
             control.Reparent(self.switch_box)
@@ -3570,17 +3571,6 @@ class Gui(wx.Frame):
         self.auto_run_button.Bind(wx.EVT_TOGGLEBUTTON,
                                   self.on_auto_run_button)
         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
-        self.open_button.Bind(wx.EVT_BUTTON, lambda event: self.on_open_file())
-        self.save_button.Bind(wx.EVT_BUTTON, lambda event: self.on_save_file())
-        self.export_circuit_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_export_circuit()
-        )
-        self.export_scope_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_export_scope()
-        )
-        self.settings_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_settings_button()
-        )
         self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
@@ -3664,68 +3654,34 @@ class Gui(wx.Frame):
         self.set_status(self.t(messages[mode]))
 
     def on_menu(self, event):
-        """Handle menu events."""
+        """Handle menu events.
+
+        Handlers that open a dialog are deferred with ``wx.CallAfter`` so
+        the dialog opens only after the menu has fully closed; launching it
+        from inside the menu event can glitch the popup on some platforms.
+        """
         event_id = event.GetId()
         if event_id == wx.ID_EXIT:
             self.stop_auto_run()
             self.Close(True)
         elif event_id == wx.ID_OPEN:
-            self.on_open_file()
+            wx.CallAfter(self.on_open_file)
         elif event_id == wx.ID_SAVEAS:
-            self.on_save_file()
+            wx.CallAfter(self.on_save_file)
         elif event_id == int(self.export_circuit_menu_id):
-            self.on_export_circuit()
+            wx.CallAfter(self.on_export_circuit)
         elif event_id == int(self.export_scope_menu_id):
-            self.on_export_scope()
+            wx.CallAfter(self.on_export_scope)
         elif event_id == int(self.help_menu_id):
-            self.on_help()
+            wx.CallAfter(self.on_help)
         elif event_id == wx.ID_ABOUT:
-            self.on_about()
-
-    def on_settings_button(self):
-        """Show rarely used display and language controls."""
-        settings_menu = wx.Menu()
-        language_menu = wx.Menu()
-
-        for language_code, language_name in self.language_names.items():
-            item = language_menu.AppendRadioItem(
-                wx.ID_ANY, language_name
-            )
-            if language_code == self.current_language:
-                item.Check(True)
-            self.Bind(
-                wx.EVT_MENU,
-                lambda event, code=language_code: self.set_language(code),
-                id=item.GetId(),
-            )
-
-        settings_menu.AppendSubMenu(language_menu, self.t("language"))
-        settings_menu.AppendSeparator()
-
-        dark_item = settings_menu.AppendCheckItem(
-            wx.ID_ANY, self.t("dark_mode")
-        )
-        dark_item.Check(self.dark_mode)
-        self.Bind(
-            wx.EVT_MENU, lambda event: self.on_dark_mode_button(),
-            id=dark_item.GetId()
-        )
-
-        colour_item = settings_menu.AppendCheckItem(
-            wx.ID_ANY, self.t("colour_blind_mode")
-        )
-        colour_item.Check(self.colour_blind_mode)
-        self.Bind(
-            wx.EVT_MENU, lambda event: self.on_colour_blind_button(),
-            id=colour_item.GetId()
-        )
-
-        self.settings_button.PopupMenu(settings_menu)
-        settings_menu.Destroy()
-
-    def on_language_button(self):
-        """Compatibility wrapper for older tests or handlers."""
-        self.on_settings_button()
+            wx.CallAfter(self.on_about)
+        elif event_id == self.dark_mode_menu_item.GetId():
+            self.on_dark_mode_button()
+        elif event_id == self.colour_blind_menu_item.GetId():
+            self.on_colour_blind_button()
+        elif event_id in self.language_menu_codes:
+            self.set_language(self.language_menu_codes[event_id])
 
     def set_language(self, language_code):
         """Switch visible GUI labels to the selected language."""
@@ -3733,6 +3689,9 @@ class Gui(wx.Frame):
             return
 
         self.current_language = language_code
+        for item_id, code in self.language_menu_codes.items():
+            if code == language_code:
+                self.language_menu.Check(item_id, True)
         self.canvas.set_translator(self.t)
         self.update_language_labels()
         self.set_status(self.t("language_changed"))
@@ -3740,6 +3699,7 @@ class Gui(wx.Frame):
     def on_dark_mode_button(self):
         """Toggle between light and dark interface themes."""
         self.dark_mode = not self.dark_mode
+        self.dark_mode_menu_item.Check(self.dark_mode)
         self.apply_theme()
         if self.dark_mode:
             self.set_status(self.t("dark_mode_enabled"))
@@ -3749,6 +3709,7 @@ class Gui(wx.Frame):
     def on_colour_blind_button(self):
         """Toggle colour-blind-safe signal colours."""
         self.colour_blind_mode = not self.colour_blind_mode
+        self.colour_blind_menu_item.Check(self.colour_blind_mode)
         self.apply_theme()
         if self.colour_blind_mode:
             self.set_status(self.t("colour_blind_enabled"))
@@ -3759,7 +3720,8 @@ class Gui(wx.Frame):
         """Apply the current language to visible menus and controls."""
         self.SetTitle(self.t("window_title"))
         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
-        self.menu_bar.SetMenuLabel(1, self.t("menu_help"))
+        self.menu_bar.SetMenuLabel(1, self.t("settings"))
+        self.menu_bar.SetMenuLabel(2, self.t("menu_help"))
         self.open_menu_item.SetItemLabel(self.t("menu_open"))
         self.save_menu_item.SetItemLabel(self.t("menu_save"))
         self.export_circuit_menu_item.SetItemLabel(
@@ -3769,6 +3731,11 @@ class Gui(wx.Frame):
             self.t("menu_export_scope")
         )
         self.exit_menu_item.SetItemLabel(self.t("menu_exit"))
+        self.language_menu_item.SetItemLabel(self.t("language"))
+        self.dark_mode_menu_item.SetItemLabel(self.t("dark_mode"))
+        self.colour_blind_menu_item.SetItemLabel(
+            self.t("colour_blind_mode")
+        )
         self.help_menu_item.SetItemLabel(self.t("menu_help_item"))
         self.about_menu_item.SetItemLabel(self.t("menu_about"))
 
@@ -3778,11 +3745,6 @@ class Gui(wx.Frame):
         self.step_button.SetLabel(self.t("step"))
         self.auto_run_button.SetLabel(self.t("auto_run"))
         self.speed_label.SetLabel(self.t("auto_speed"))
-        self.open_button.SetLabel(self.t("open_file"))
-        self.save_button.SetLabel(self.t("save_file"))
-        self.export_circuit_button.SetLabel(self.t("export_circuit"))
-        self.export_scope_button.SetLabel(self.t("export_scope"))
-        self.settings_button.SetLabel(self.t("settings"))
         self.help_button.SetLabel(self.t("help"))
 
         self.switch_box.SetLabel(self.t("switches"))
@@ -3790,7 +3752,6 @@ class Gui(wx.Frame):
         self.view_box.SetLabel(self.t("view"))
         self.readings_box.SetLabel(self.t("readings"))
         self.log_box.SetLabel(self.t("log"))
-        self.switch_label.SetLabel(self.t("switch"))
         self.switch_value.SetLabel(self.t("value"))
         self.set_switch_button.SetLabel(self.t("set_switch"))
         self.add_monitor_label.SetLabel(self.t("available_signals"))
