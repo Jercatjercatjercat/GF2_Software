@@ -30,6 +30,34 @@ If `python3` cannot import `wx`, use the Python executable from the conda enviro
 python logsim/logsim.py examples/example1_mixed_combinational.txt
 ```
 
+## Selecting the GUI language
+
+The GUI language can be changed while the simulator is running:
+
+```text
+Settings > Language
+```
+
+Available languages are English, Spanish, Arabic, French, and German.
+
+You can also choose the startup language for one launch by setting `LANG` before the command:
+
+```bash
+LANG=es_ES.utf8 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+LANG=fr_FR.utf8 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+LANG=de_DE.utf8 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+LANG=ar_SA.utf8 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+LANG=en_GB.utf8 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
+```
+
+On PowerShell, set `LANG` first, then run the simulator:
+
+```powershell
+$env:LANG = "es_ES.utf8"
+python logsim\logsim.py examples\example1_mixed_combinational.txt
+Remove-Item Env:LANG
+```
+
 ## Example 1: mixed combinational logic
 
 Text interface:
