@@ -1,6 +1,7 @@
 """Test GUI canvas helpers without opening a wxPython window."""
 
 import importlib
+import math
 import sys
 import types
 from types import SimpleNamespace
@@ -165,6 +166,15 @@ def make_canvas(devices):
     canvas.circuit_scroll_x = 0
     canvas.circuit_scroll_y = 0
     canvas.circuit_geometry = {}
+    canvas.circuit_display_3d = False
+    canvas.circuit_3d_rotate_x = 34.0
+    canvas.circuit_3d_rotate_y = -40.0
+    canvas.circuit_3d_pan_x = 0.0
+    canvas.circuit_3d_pan_y = 0.0
+    canvas.circuit_3d_zoom = 1.0
+    canvas.circuit_3d_drag_active = False
+    canvas.circuit_3d_wire_base = 10.0
+    canvas.circuit_3d_wire_band = 56.0
     canvas.dark_mode = False
     canvas.colour_blind_mode = False
     canvas.trace_colours = [
@@ -513,3 +523,147 @@ def test_display_bounds_never_exceed_actual_canvas_width():
 
     assert circuit_bounds[0] + circuit_bounds[2] <= narrow_width
     assert scope_bounds[0] + scope_bounds[2] <= narrow_width
+
+
+def test_circuit_3d_wire_height_separates_and_stays_bounded():
+    """Test if 3D wires get distinct, non-overlapping, bounded heights."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    # A single wire sits at the base height with nothing to clear.
+    assert canvas.circuit_3d_wire_height(0, 1) == canvas.circuit_3d_wire_base
+    assert canvas.circuit_3d_wire_top(0) == canvas.circuit_3d_wire_base
+
+    # A few wires spread to the upper gap clamp (14.0) so they read clearly.
+    assert canvas.circuit_3d_wire_height(1, 2) == (
+        canvas.circuit_3d_wire_base + 14.0
+    )
+
+    # Many wires hit the lower gap clamp: the gap never shrinks below the
+    # wire thickness (4.5), so wires that cross on the floor still pass over
+    # one another rather than overlapping.
+    count = 30
+    heights = [canvas.circuit_3d_wire_height(i, count) for i in range(count)]
+    gaps = [heights[i + 1] - heights[i] for i in range(count - 1)]
+    assert heights == sorted(heights)
+    assert len(set(heights)) == count
+    assert min(gaps) == 4.5
+    assert max(gaps) <= 14.0
+    assert canvas.circuit_3d_wire_top(count) == heights[-1]
+
+
+def test_circuit_3d_zoom_keeps_cursor_point_fixed():
+    """Test if zooming the 3D circuit pins the cursor's world point."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    view_x, view_y, view_width, view_height = 20, 30, 400, 300
+    old_distance = 500.0
+    canvas.circuit_geometry = {
+        "mode": "3d",
+        "viewport": (view_x, view_y, view_width, view_height),
+        "camera_distance": old_distance,
+        "fov_y": 40.0,
+    }
+    cursor_x = view_x + 0.75 * view_width
+    cursor_y = view_y + 0.20 * view_height
+    old_zoom = canvas.circuit_3d_zoom
+
+    canvas.zoom_circuit_3d_at(1.12, cursor_x, cursor_y)
+
+    new_zoom = canvas.circuit_3d_zoom
+    assert new_zoom > old_zoom
+    new_distance = (
+        old_distance * max(old_zoom, 0.2) / max(new_zoom, 0.2)
+    )
+    tan_y = math.tan(math.radians(20.0))
+    tan_x = tan_y * (view_width / view_height)
+    ndc_x = 2.0 * (cursor_x - view_x) / view_width - 1.0
+    ndc_y = 2.0 * (cursor_y - view_y) / view_height - 1.0
+    # The rotated world point under the cursor is fixed; re-projecting it
+    # after the zoom must land on the same normalised screen position.
+    rotated_x = ndc_x * old_distance * tan_x
+    rotated_y = ndc_y * old_distance * tan_y
+    reprojected_x = (rotated_x + canvas.circuit_3d_pan_x) / (
+        new_distance * tan_x
+    )
+    reprojected_y = (rotated_y + canvas.circuit_3d_pan_y) / (
+        new_distance * tan_y
+    )
+    assert abs(reprojected_x - ndc_x) < 1e-6
+    assert abs(reprojected_y - ndc_y) < 1e-6
+
+
+def test_circuit_3d_zoom_at_centre_leaves_pan_unchanged():
+    """Test if zooming with the cursor centred does not shift the pan."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    canvas.circuit_geometry = {
+        "mode": "3d",
+        "viewport": (0, 0, 400, 300),
+        "camera_distance": 500.0,
+        "fov_y": 40.0,
+    }
+
+    canvas.zoom_circuit_3d_at(1.12, 200, 150)
+
+    assert canvas.circuit_3d_pan_x == 0.0
+    assert canvas.circuit_3d_pan_y == 0.0
+    assert canvas.circuit_3d_zoom > 1.0
+
+
+def test_set_circuit_3d_scroll_maps_fraction_to_pan():
+    """Test if scrollbar fractions pan the 3D camera across its range."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.circuit_geometry = {
+        "mode": "3d", "max_pan_x": 100.0, "max_pan_y": 80.0,
+    }
+
+    # Vertical: fraction 0 frames the top, 1 the bottom, 0.5 the centre.
+    canvas.set_circuit_3d_scroll("vertical", 0.0)
+    assert canvas.circuit_3d_pan_y == -80.0
+    canvas.set_circuit_3d_scroll("vertical", 1.0)
+    assert canvas.circuit_3d_pan_y == 80.0
+    canvas.set_circuit_3d_scroll("vertical", 0.5)
+    assert canvas.circuit_3d_pan_y == 0.0
+
+    # Horizontal: fraction 0 frames the left, 1 the right.
+    canvas.set_circuit_3d_scroll("horizontal", 0.0)
+    assert canvas.circuit_3d_pan_x == 100.0
+    canvas.set_circuit_3d_scroll("horizontal", 1.0)
+    assert canvas.circuit_3d_pan_x == -100.0
+
+    # Out-of-range fractions are clamped, never flinging the camera away.
+    canvas.set_circuit_3d_scroll("vertical", 5.0)
+    assert canvas.circuit_3d_pan_y == 80.0
+
+
+def test_circuit_3d_scrollbar_drag_pans_camera():
+    """Test if dragging the 3D scrollbar thumb moves the camera pan."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.draw_rectangle = lambda *args, **kwargs: None
+    view_bounds = (10, 40, 400, 300)
+    canvas.circuit_geometry = {
+        "mode": "3d",
+        "max_pan_x": 100.0, "max_pan_y": 80.0,
+        "content_x": 600.0, "content_y": 500.0,
+        "visible_x": 300.0, "visible_y": 250.0,
+    }
+    canvas.draw_circuit_scrollbars_3d(view_bounds)
+
+    track = canvas.circuit_geometry["vertical_track"]
+    thumb = canvas.circuit_geometry["vertical_thumb"]
+    track_y, thumb_height = track[1], thumb[3]
+    usable = max(track[3] - thumb_height, 1)
+    canvas.circuit_drag_mode = "vertical"
+    canvas.circuit_drag_offset = 0
+
+    # Thumb dragged to the top of the track frames the top of the scene.
+    canvas.update_circuit_scroll_drag(track[0], track_y + usable)
+    assert canvas.circuit_3d_pan_y == -80.0
+    # Thumb dragged to the bottom frames the bottom of the scene.
+    canvas.update_circuit_scroll_drag(track[0], track_y)
+    assert canvas.circuit_3d_pan_y == 80.0

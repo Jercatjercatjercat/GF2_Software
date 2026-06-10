@@ -114,8 +114,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_display_3d = False
         self.circuit_3d_rotate_x = 34.0
         self.circuit_3d_rotate_y = -40.0
+        self.circuit_3d_pan_x = 0.0
+        self.circuit_3d_pan_y = 0.0
         self.circuit_3d_zoom = 1.0
         self.circuit_3d_drag_active = False
+        self.circuit_3d_wire_base = 10.0
+        self.circuit_3d_wire_band = 56.0
 
         self.left_margin = 150
         self.canvas_horizontal_padding = 36
@@ -208,6 +212,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Restore the 3D circuit camera to a readable default angle."""
         self.circuit_3d_rotate_x = 34.0
         self.circuit_3d_rotate_y = -40.0
+        self.circuit_3d_pan_x = 0.0
+        self.circuit_3d_pan_y = 0.0
         self.circuit_3d_zoom = 1.0
         self.circuit_3d_drag_active = False
 
@@ -245,6 +251,82 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_scroll_x *= self.circuit_zoom / old_zoom
             self.circuit_scroll_y *= self.circuit_zoom / old_zoom
         self.Refresh()
+
+    def zoom_circuit_at(self, factor, cursor_x, cursor_y):
+        """Zoom the circuit toward the cursor so it stays under the mouse."""
+        view = self.circuit_geometry.get("view")
+        content = getattr(self, "last_circuit_content", None)
+        if not view or not content:
+            self.zoom_circuit(factor)
+            return
+        old_zoom = self.circuit_zoom
+        new_zoom = self.clamp(old_zoom * factor, 0.1, 3.0)
+        if new_zoom == old_zoom:
+            return
+        view_x, view_y, view_width, view_height = view
+        base_width, base_height = content
+        origin_x = view_x - self.circuit_scroll_x
+        origin_y = (
+            view_y + view_height - base_height * old_zoom
+            + self.circuit_scroll_y
+        )
+        base_x = (cursor_x - origin_x) / old_zoom
+        base_y = (cursor_y - origin_y) / old_zoom
+
+        self.circuit_zoom = new_zoom
+        self.circuit_scroll_x = self.clamp(
+            view_x + base_x * new_zoom - cursor_x,
+            0, max(base_width * new_zoom - view_width, 0)
+        )
+        scroll_y = (
+            cursor_y - view_y - view_height
+            + (base_height - base_y) * new_zoom
+        )
+        self.circuit_scroll_y = self.clamp(
+            scroll_y, 0, max(base_height * new_zoom - view_height, 0)
+        )
+        self.Refresh()
+
+    def zoom_circuit_3d_at(self, factor, cursor_x, cursor_y):
+        """Zoom the 3D circuit toward the cursor under the mouse."""
+        old_zoom = self.circuit_3d_zoom
+        new_zoom = self.clamp(old_zoom * factor, 0.3, 3.5)
+        if new_zoom != old_zoom:
+            shift_x, shift_y = self.circuit_3d_zoom_pan_shift(
+                old_zoom, new_zoom, cursor_x, cursor_y
+            )
+            self.circuit_3d_pan_x += shift_x
+            self.circuit_3d_pan_y += shift_y
+            self.circuit_3d_zoom = new_zoom
+        self.Refresh()
+
+    def circuit_3d_zoom_pan_shift(self, old_zoom, new_zoom,
+                                  cursor_x, cursor_y):
+        """Return the pan shift that keeps the cursor point fixed when zooming.
+
+        Zooming changes the camera distance, which would otherwise slide the
+        world point under the mouse across the screen; this shift cancels that
+        slide so the 3D circuit zooms toward the cursor exactly as the 2D
+        overview does.
+        """
+        geometry = self.circuit_geometry
+        viewport = geometry.get("viewport")
+        old_distance = geometry.get("camera_distance")
+        if not viewport or not old_distance:
+            return 0.0, 0.0
+        view_x, view_y, view_width, view_height = viewport
+        if view_width <= 0 or view_height <= 0:
+            return 0.0, 0.0
+        new_distance = (
+            old_distance * max(old_zoom, 0.2) / max(new_zoom, 0.2)
+        )
+        distance_delta = new_distance - old_distance
+        tan_y = math.tan(math.radians(geometry.get("fov_y", 40.0) / 2.0))
+        tan_x = tan_y * (view_width / max(view_height, 1))
+        ndc_x = 2.0 * (cursor_x - view_x) / view_width - 1.0
+        ndc_y = 2.0 * (cursor_y - view_y) / view_height - 1.0
+        return (ndc_x * tan_x * distance_delta,
+                ndc_y * tan_y * distance_delta)
 
     def fit_circuit(self):
         """Fit the whole circuit into the view (2D), or re-frame it (3D)."""
@@ -669,8 +751,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return
 
         if self.circuit_display_3d:
-            self.circuit_geometry = {"view": view_bounds}
+            self.circuit_geometry = {"view": view_bounds, "mode": "3d"}
             self.draw_3d_circuit(view_bounds)
+            self.draw_circuit_scrollbars(view_bounds)
             return
 
         base_content_width, base_content_height = self.circuit_content_size(
@@ -744,12 +827,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return
 
         layout = self.circuit_3d_layout(positions)
+        grid = getattr(self, "circuit_grid", None)
+        wire_paths = self.circuit_wire_paths(positions, grid) if grid else []
         size = self.GetClientSize()
         x_pos, y_pos, width, height = viewport
+        wire_top = self.circuit_3d_wire_top(len(wire_paths))
         camera_distance, far_plane = self.fit_3d_camera_distance(
             width, height, layout["span_x"], layout["span_z"], 40.0,
             self.circuit_3d_rotate_x, self.circuit_3d_rotate_y,
-            self.circuit_3d_zoom, half_height=32.0, fov_y=40.0
+            self.circuit_3d_zoom, half_height=max(32.0, wire_top + 8.0),
+            fov_y=40.0
+        )
+        self.store_circuit_3d_geometry(
+            (x_pos, y_pos, width, height), camera_distance, layout
         )
         try:
             GL.glViewport(x_pos, y_pos, width, height)
@@ -763,17 +853,43 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GLU.gluPerspective(40.0, width / max(height, 1), 1.0, far_plane)
             GL.glMatrixMode(GL.GL_MODELVIEW)
             GL.glLoadIdentity()
-            GL.glTranslatef(0.0, -10.0, -camera_distance)
+            GL.glTranslatef(
+                self.circuit_3d_pan_x, -10.0 + self.circuit_3d_pan_y,
+                -camera_distance,
+            )
             GL.glRotatef(self.circuit_3d_rotate_x, 1.0, 0.0, 0.0)
             GL.glRotatef(self.circuit_3d_rotate_y, 0.0, 1.0, 0.0)
             self.configure_3d_lighting()
             self.draw_3d_circuit_floor(layout)
-            self.draw_3d_circuit_wires(layout, positions)
+            self.draw_3d_circuit_wires(layout, wire_paths)
             self.draw_3d_circuit_blocks(layout)
             self.draw_3d_circuit_pins(layout, positions)
         finally:
             GL.glLineWidth(1.0)
             self.configure_2d_projection(size)
+
+    def store_circuit_3d_geometry(self, viewport, camera_distance, layout):
+        """Record 3D camera framing for zoom-to-cursor and the scrollbars."""
+        view_x, view_y, view_width, view_height = viewport
+        fov_y = 40.0
+        tan_y = math.tan(math.radians(fov_y / 2.0))
+        tan_x = tan_y * (view_width / max(view_height, 1))
+        visible_x = 2.0 * camera_distance * tan_x
+        visible_y = 2.0 * camera_distance * tan_y
+        pan_extent_x = max(layout["span_x"], 1.0)
+        pan_extent_y = max(layout["span_z"], 60.0)
+        self.circuit_geometry.update({
+            "mode": "3d",
+            "viewport": viewport,
+            "camera_distance": camera_distance,
+            "fov_y": fov_y,
+            "visible_x": visible_x,
+            "visible_y": visible_y,
+            "content_x": pan_extent_x + visible_x,
+            "content_y": pan_extent_y + visible_y,
+            "max_pan_x": pan_extent_x / 2.0,
+            "max_pan_y": pan_extent_y / 2.0,
+        })
 
     def circuit_3d_layout(self, positions):
         """Return centred 3D coordinates for the blocks and their wires."""
@@ -841,44 +957,97 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             line_z += 60.0
         GL.glEnd()
 
-    def draw_3d_circuit_wires(self, layout, positions):
+    def draw_3d_circuit_wires(self, layout, paths):
         """Draw the orthogonal 2D routes as raised conduits on the 3D floor.
 
         Reusing the 2D router gives the 3D wires the same per-wire lanes and
-        the same distinct input-pin connections, so they stay unambiguous and
-        never sit on top of one another, while a little height and thickness
-        makes them read as solid wires rather than flat lines.
+        the same distinct input-pin connections, and lifting each wire to its
+        own height means wires that would cross on the floor pass cleanly over
+        one another in 3D instead of overlapping.
         """
-        grid = getattr(self, "circuit_grid", None)
-        if not grid:
+        if not paths:
             return
         mid_x = layout["mid_x"]
         mid_z = layout["mid_z"]
         scale = layout["scale"]
-        for points, signal in self.circuit_wire_paths(positions, grid):
+        pin_y = 4.5
+        count = len(paths)
+        for index, (points, signal) in enumerate(paths):
             self.set_colour(*self.signal_colour(signal))
-            floor_points = [
+            floor = [
                 ((point_x - mid_x) * scale, -(point_y - mid_z) * scale)
                 for point_x, point_y in points
             ]
-            for start, end in zip(floor_points, floor_points[1:]):
-                self.draw_3d_wire_segment(start[0], start[1], end[0], end[1])
+            height = self.circuit_3d_wire_height(index, count)
+            route = [(floor[0][0], pin_y, floor[0][1])]
+            route += [(fx, height, fz) for fx, fz in floor]
+            route.append((floor[-1][0], pin_y, floor[-1][1]))
+            for start, end in zip(route, route[1:]):
+                self.draw_3d_wire_segment(start, end)
 
-    def draw_3d_wire_segment(self, x_start, z_start, x_end, z_end):
-        """Draw one axis-aligned wire segment as a thin raised bar."""
-        half = 1.6
-        height = 5.0
-        if abs(x_end - x_start) >= abs(z_end - z_start):
-            centre_x = (x_start + x_end) / 2
-            centre_z = z_start
-            half_width = abs(x_end - x_start) / 2 + half
-            half_depth = half
-        else:
-            centre_x = x_start
-            centre_z = (z_start + z_end) / 2
-            half_width = half
-            half_depth = abs(z_end - z_start) / 2 + half
-        self.draw_3d_cuboid(centre_x, centre_z, half_width, half_depth, height)
+    def circuit_3d_wire_height(self, index, count):
+        """Return the lifted height for one of ``count`` 3D wires.
+
+        Spreading the wires evenly across a bounded height band keeps a clear
+        gap between them, so wires that cross on the floor pass over each
+        other in 3D rather than overlapping; the gap never drops below the
+        wire thickness so the separation always holds.
+        """
+        if count <= 1:
+            return self.circuit_3d_wire_base
+        step = self.clamp(self.circuit_3d_wire_band / (count - 1), 4.5, 14.0)
+        return self.circuit_3d_wire_base + index * step
+
+    def circuit_3d_wire_top(self, count):
+        """Return the height of the highest 3D wire, for camera framing."""
+        if count <= 0:
+            return self.circuit_3d_wire_base
+        return self.circuit_3d_wire_height(count - 1, count)
+
+    def draw_3d_wire_segment(self, start, end):
+        """Draw one axis-aligned wire segment as a thin solid bar in 3D."""
+        half = 1.3
+        x_lo, x_hi = sorted((start[0], end[0]))
+        y_lo, y_hi = sorted((start[1], end[1]))
+        z_lo, z_hi = sorted((start[2], end[2]))
+        self.draw_3d_box(x_lo - half, x_hi + half, y_lo - half, y_hi + half,
+                         z_lo - half, z_hi + half)
+
+    def draw_3d_box(self, x_lo, x_hi, y_lo, y_hi, z_lo, z_hi):
+        """Draw a lit axis-aligned box spanning the given extents."""
+        GL.glEnable(GL.GL_LIGHTING)
+        GL.glBegin(GL.GL_QUADS)
+        GL.glNormal3f(0.0, -1.0, 0.0)
+        GL.glVertex3f(x_lo, y_lo, z_lo)
+        GL.glVertex3f(x_hi, y_lo, z_lo)
+        GL.glVertex3f(x_hi, y_lo, z_hi)
+        GL.glVertex3f(x_lo, y_lo, z_hi)
+        GL.glNormal3f(0.0, 1.0, 0.0)
+        GL.glVertex3f(x_lo, y_hi, z_hi)
+        GL.glVertex3f(x_hi, y_hi, z_hi)
+        GL.glVertex3f(x_hi, y_hi, z_lo)
+        GL.glVertex3f(x_lo, y_hi, z_lo)
+        GL.glNormal3f(-1.0, 0.0, 0.0)
+        GL.glVertex3f(x_lo, y_lo, z_hi)
+        GL.glVertex3f(x_lo, y_hi, z_hi)
+        GL.glVertex3f(x_lo, y_hi, z_lo)
+        GL.glVertex3f(x_lo, y_lo, z_lo)
+        GL.glNormal3f(1.0, 0.0, 0.0)
+        GL.glVertex3f(x_hi, y_lo, z_lo)
+        GL.glVertex3f(x_hi, y_hi, z_lo)
+        GL.glVertex3f(x_hi, y_hi, z_hi)
+        GL.glVertex3f(x_hi, y_lo, z_hi)
+        GL.glNormal3f(0.0, 0.0, -1.0)
+        GL.glVertex3f(x_lo, y_lo, z_lo)
+        GL.glVertex3f(x_lo, y_hi, z_lo)
+        GL.glVertex3f(x_hi, y_hi, z_lo)
+        GL.glVertex3f(x_hi, y_lo, z_lo)
+        GL.glNormal3f(0.0, 0.0, 1.0)
+        GL.glVertex3f(x_hi, y_lo, z_hi)
+        GL.glVertex3f(x_hi, y_hi, z_hi)
+        GL.glVertex3f(x_lo, y_hi, z_hi)
+        GL.glVertex3f(x_lo, y_lo, z_hi)
+        GL.glEnd()
 
     def draw_3d_circuit_pins(self, layout, positions):
         """Draw spheres at every input and output pin, as in the 2D view."""
@@ -1062,6 +1231,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def draw_circuit_scrollbars(self, view_bounds):
         """Draw scrollbars for oversized circuit diagrams."""
+        if self.circuit_geometry.get("mode") == "3d":
+            self.draw_circuit_scrollbars_3d(view_bounds)
+            return
         view_x, view_y, view_width, view_height = view_bounds
         content_width = self.circuit_geometry.get("content_width", view_width)
         content_height = self.circuit_geometry.get(
@@ -1115,6 +1287,92 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         else:
             self.circuit_geometry["horizontal_track"] = None
             self.circuit_geometry["horizontal_thumb"] = None
+
+    def draw_circuit_scrollbars_3d(self, view_bounds):
+        """Draw scrollbars that pan the rotatable 3D circuit camera.
+
+        The 3D view has no fixed content rectangle, so the bars instead move
+        the camera within a bounded pan range: the thumb size reflects how
+        much of the scene is on screen and its position reflects the current
+        pan, giving the same "drag to move around" handle as the 2D view.
+        """
+        view_x, view_y, view_width, view_height = view_bounds
+        geometry = self.circuit_geometry
+        max_pan_x = geometry.get("max_pan_x", 0)
+        max_pan_y = geometry.get("max_pan_y", 0)
+
+        if max_pan_y > 0:
+            content_y = max(geometry.get("content_y", view_height), 1)
+            visible_y = geometry.get("visible_y", view_height)
+            track = (view_x + view_width + 6, view_y, 10, view_height)
+            thumb_height = self.clamp(
+                view_height * visible_y / content_y, 28, view_height
+            )
+            usable = max(view_height - thumb_height, 1)
+            fraction = self.clamp(
+                (self.circuit_3d_pan_y + max_pan_y) / (2 * max_pan_y), 0, 1
+            )
+            thumb_y = view_y + (1 - fraction) * usable
+            thumb = (track[0] + 1, thumb_y, 8, thumb_height)
+            self.draw_rectangle(
+                track,
+                self.theme_colour("scrollbar_track"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.draw_rectangle(
+                thumb,
+                self.theme_colour("scrollbar_thumb"),
+                self.theme_colour("scrollbar_border"),
+            )
+            geometry["vertical_track"] = track
+            geometry["vertical_thumb"] = thumb
+        else:
+            geometry["vertical_track"] = None
+            geometry["vertical_thumb"] = None
+
+        if max_pan_x > 0:
+            content_x = max(geometry.get("content_x", view_width), 1)
+            visible_x = geometry.get("visible_x", view_width)
+            track = (view_x, view_y - 16, view_width, 11)
+            thumb_width = self.clamp(
+                view_width * visible_x / content_x, 44, view_width
+            )
+            usable = max(view_width - thumb_width, 1)
+            fraction = self.clamp(
+                (max_pan_x - self.circuit_3d_pan_x) / (2 * max_pan_x), 0, 1
+            )
+            thumb_x = view_x + fraction * usable
+            thumb = (thumb_x, track[1] + 1, thumb_width, 9)
+            self.draw_rectangle(
+                track,
+                self.theme_colour("scrollbar_track"),
+                self.theme_colour("scrollbar_border"),
+            )
+            self.draw_rectangle(
+                thumb,
+                self.theme_colour("scrollbar_thumb"),
+                self.theme_colour("scrollbar_border"),
+            )
+            geometry["horizontal_track"] = track
+            geometry["horizontal_thumb"] = thumb
+        else:
+            geometry["horizontal_track"] = None
+            geometry["horizontal_thumb"] = None
+
+    def set_circuit_3d_scroll(self, axis, fraction):
+        """Pan the 3D circuit camera from a scrollbar fraction in [0, 1].
+
+        ``fraction`` 0 frames the top/left of the scene and 1 the
+        bottom/right, matching the 2D scrollbar convention and the
+        drag-to-pan direction.
+        """
+        fraction = self.clamp(fraction, 0.0, 1.0)
+        if axis == "vertical":
+            max_pan = self.circuit_geometry.get("max_pan_y", 0.0)
+            self.circuit_3d_pan_y = (fraction * 2.0 - 1.0) * max_pan
+        else:
+            max_pan = self.circuit_geometry.get("max_pan_x", 0.0)
+            self.circuit_3d_pan_x = (1.0 - fraction * 2.0) * max_pan
 
     def estimate_circuit_height(self):
         """Return enough circuit height to avoid stacked device overlap."""
@@ -2512,11 +2770,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return True
 
     def update_circuit_3d_drag(self, event):
-        """Rotate the 3D circuit camera during a mouse drag."""
+        """Rotate (or, with the right button, pan) the 3D circuit camera."""
         x_delta = event.GetX() - self.last_mouse_x
         y_delta = event.GetY() - self.last_mouse_y
         self.last_mouse_x = event.GetX()
         self.last_mouse_y = event.GetY()
+        if event.RightIsDown():
+            scale = 1.6 / max(self.circuit_3d_zoom, 0.3)
+            self.circuit_3d_pan_x += x_delta * scale
+            self.circuit_3d_pan_y -= y_delta * scale
+            return
         self.circuit_3d_rotate_y += x_delta * 0.5
         self.circuit_3d_rotate_x = self.clamp(
             self.circuit_3d_rotate_x + y_delta * 0.5, 8.0, 82.0
@@ -2604,12 +2867,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return False
 
     def update_circuit_scroll_drag(self, x_pos, y_pos):
-        """Update circuit viewport scroll while a scrollbar is dragged."""
+        """Update circuit scroll (2D) or camera pan (3D) during a drag."""
+        is_3d = self.circuit_geometry.get("mode") == "3d"
         if self.circuit_drag_mode == "vertical":
             track = self.circuit_geometry.get("vertical_track")
             thumb = self.circuit_geometry.get("vertical_thumb")
             max_scroll_y = self.circuit_geometry.get("max_scroll_y", 0)
-            if not track or not thumb or max_scroll_y == 0:
+            if not track or not thumb or (not is_3d and max_scroll_y == 0):
                 return
 
             _, track_y, _, track_height = track
@@ -2619,13 +2883,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 y_pos - self.circuit_drag_offset, track_y, track_y + usable
             )
             fraction = 1 - ((thumb_y - track_y) / usable)
-            self.circuit_scroll_y = fraction * max_scroll_y
+            if is_3d:
+                self.set_circuit_3d_scroll("vertical", fraction)
+            else:
+                self.circuit_scroll_y = fraction * max_scroll_y
 
         if self.circuit_drag_mode == "horizontal":
             track = self.circuit_geometry.get("horizontal_track")
             thumb = self.circuit_geometry.get("horizontal_thumb")
             max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
-            if not track or not thumb or max_scroll_x == 0:
+            if not track or not thumb or (not is_3d and max_scroll_x == 0):
                 return
 
             track_x, _, track_width, _ = track
@@ -2635,7 +2902,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 x_pos - self.circuit_drag_offset, track_x, track_x + usable
             )
             fraction = (thumb_x - track_x) / usable
-            self.circuit_scroll_x = fraction * max_scroll_x
+            if is_3d:
+                self.set_circuit_3d_scroll("horizontal", fraction)
+            else:
+                self.circuit_scroll_x = fraction * max_scroll_x
 
     def wheel_circuit(self, x_pos, y_pos, wheel_rotation):
         """Zoom the circuit overview, or scroll it with Shift held."""
@@ -2644,14 +2914,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return False
         if self.circuit_display_3d:
             factor = 1.12 if wheel_rotation > 0 else 1.0 / 1.12
-            self.circuit_3d_zoom = self.clamp(
-                self.circuit_3d_zoom * factor, 0.3, 3.5
-            )
+            self.zoom_circuit_3d_at(factor, x_pos, y_pos)
             return True
         if wx.GetKeyState(wx.WXK_SHIFT):
             return self.scroll_circuit_view(x_pos, y_pos, wheel_rotation)
         factor = 1.1 if wheel_rotation > 0 else 1.0 / 1.1
-        self.zoom_circuit(factor)
+        self.zoom_circuit_at(factor, x_pos, y_pos)
         return True
 
     def scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
