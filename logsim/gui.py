@@ -240,15 +240,27 @@ class MyGLCanvas(wxcanvas.GLCanvas):
     def zoom_circuit(self, factor):
         """Zoom the circuit overview around its current scroll position."""
         old_zoom = self.circuit_zoom
-        self.circuit_zoom = self.clamp(self.circuit_zoom * factor, 0.35, 3.0)
+        self.circuit_zoom = self.clamp(self.circuit_zoom * factor, 0.1, 3.0)
         if self.circuit_zoom != old_zoom:
             self.circuit_scroll_x *= self.circuit_zoom / old_zoom
             self.circuit_scroll_y *= self.circuit_zoom / old_zoom
         self.Refresh()
 
     def fit_circuit(self):
-        """Zoom out enough to inspect a large circuit overview."""
-        self.circuit_zoom = 0.45
+        """Fit the whole circuit into the view (2D), or re-frame it (3D)."""
+        if self.circuit_display_3d:
+            self.reset_circuit_3d_view()
+            self.Refresh()
+            return
+        view = getattr(self, "last_circuit_view", None)
+        content = getattr(self, "last_circuit_content", None)
+        if view and content and content[0] > 0 and content[1] > 0:
+            self.circuit_zoom = self.clamp(
+                min(view[0] / content[0], view[1] / content[1]) * 0.97,
+                0.08, 1.0
+            )
+        else:
+            self.circuit_zoom = 0.45
         self.circuit_scroll_x = 0
         self.circuit_scroll_y = 0
         self.Refresh()
@@ -664,6 +676,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         base_content_width, base_content_height = self.circuit_content_size(
             view_width, view_height
         )
+        self.last_circuit_view = (view_width, view_height)
+        self.last_circuit_content = (base_content_width, base_content_height)
         circuit_zoom = getattr(self, "circuit_zoom", 1.0)
         content_width = base_content_width * circuit_zoom
         content_height = base_content_height * circuit_zoom
@@ -754,7 +768,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glRotatef(self.circuit_3d_rotate_y, 0.0, 1.0, 0.0)
             self.configure_3d_lighting()
             self.draw_3d_circuit_floor(layout)
-            self.draw_3d_circuit_wires(layout)
+            self.draw_3d_circuit_wires(layout, positions)
             self.draw_3d_circuit_blocks(layout)
         finally:
             GL.glLineWidth(1.0)
@@ -778,23 +792,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 -(cyp - mid_z) * scale,
                 max(pw * scale / 2, 16.0),
             )
-        wires = []
-        for target in self.devices.devices_list:
-            if target.device_id not in blocks:
-                continue
-            for input_id in self.sorted_port_ids(target.inputs):
-                connected = target.inputs[input_id]
-                if connected is None:
-                    continue
-                source_id, output_id = connected
-                if source_id not in blocks:
-                    continue
-                source = self.devices.get_device(source_id)
-                wires.append((source_id, target.device_id,
-                              source.outputs.get(output_id)))
         return {
             "blocks": blocks,
-            "wires": wires,
+            "mid_x": mid_x,
+            "mid_z": mid_z,
+            "scale": scale,
             "span_x": max((max(xs) - min(xs)) * scale, 1.0),
             "span_z": max((max(zs) - min(zs)) * scale, 1.0),
         }
@@ -838,19 +840,28 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             line_z += 60.0
         GL.glEnd()
 
-    def draw_3d_circuit_wires(self, layout):
-        """Draw connections as raised right-angled wires across the floor."""
+    def draw_3d_circuit_wires(self, layout, positions):
+        """Draw the orthogonal 2D routes mapped onto the 3D floor.
+
+        Reusing the 2D router gives the 3D wires the same per-wire lanes and
+        the same distinct input-pin connections, so they stay unambiguous and
+        never sit on top of one another.
+        """
+        grid = getattr(self, "circuit_grid", None)
+        if not grid:
+            return
+        mid_x = layout["mid_x"]
+        mid_z = layout["mid_z"]
+        scale = layout["scale"]
+        wire_y = 4.0
         GL.glDisable(GL.GL_LIGHTING)
         GL.glLineWidth(1.8)
-        wire_y = 4.0
-        for source_id, target_id, signal in layout["wires"]:
-            source_x, source_z, _ = layout["blocks"][source_id]
-            target_x, target_z, _ = layout["blocks"][target_id]
+        for points, signal in self.circuit_wire_paths(positions, grid):
             self.set_colour(*self.signal_colour(signal))
             GL.glBegin(GL.GL_LINE_STRIP)
-            GL.glVertex3f(source_x, wire_y, source_z)
-            GL.glVertex3f(target_x, wire_y, source_z)
-            GL.glVertex3f(target_x, wire_y, target_z)
+            for point_x, point_y in points:
+                GL.glVertex3f((point_x - mid_x) * scale, wire_y,
+                              -(point_y - mid_z) * scale)
             GL.glEnd()
         GL.glLineWidth(1.0)
 
@@ -1127,12 +1138,22 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         grid = getattr(self, "circuit_grid", None)
         if not grid:
             return
+        for points, signal in self.circuit_wire_paths(positions, grid):
+            self.draw_wire_path(points, signal)
 
+    def circuit_wire_paths(self, positions, grid):
+        """Return ``(points, signal)`` for every routed wire.
+
+        The same clean orthogonal routes drive both the 2D diagram and the
+        3D circuit floor, so the 3D wires inherit the channel/corridor lanes
+        and connect to the same distinct input pins.
+        """
         wires = self.collect_circuit_wires(positions, grid)
         self.assign_wire_lanes(wires)
-        for wire in wires:
-            self.draw_wire_path(self.route_circuit_wire(wire, grid),
-                                wire["signal"])
+        return [
+            (self.route_circuit_wire(wire, grid), wire["signal"])
+            for wire in wires
+        ]
 
     def collect_circuit_wires(self, positions, grid):
         """Return a routed-wire description for every connected input."""
