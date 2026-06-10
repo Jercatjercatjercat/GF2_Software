@@ -373,3 +373,31 @@ class Gui(wx.Frame):
         """Handle the event when the user enters text."""
         text_box_value = self.text_box.GetValue()
         self.canvas.render()
+
+# Preserve the supplied standalone 3D template class before exposing the
+# maintained 3D launcher as Gui.
+TemplateGui = Gui
+
+# Modern 3D launcher -------------------------------------------------------
+# The original class above is kept as the supplied 3D template/example.  The
+# application entry point below reuses the maintained GUI and opens it with
+# the oscilloscope's real 3D trace mode enabled by default.
+from gui import Gui as BaseGui, show_parse_error_dialog
+
+
+class Gui3D(BaseGui):
+    """Start the maintained GUI with 3D trace display enabled by default."""
+
+    def __init__(self, *args, **kwargs):
+        """Initialise the normal GUI, then switch the trace view to 3D."""
+        super().__init__(*args, **kwargs)
+        self.enable_3d_visualisation()
+
+    def enable_3d_visualisation(self):
+        """Enable the oscilloscope 3D trace view and synchronise the toggle."""
+        self.canvas.set_trace_display_3d(True)
+        self.trace_display_button.SetValue(True)
+        self.set_status(self.t("trace_display_3d_enabled"))
+
+
+Gui = Gui3D

@@ -18,11 +18,19 @@ Use `-c` for the text/command-line interface:
 python3 logsim/logsim.py -c examples/example1_mixed_combinational.txt
 ```
 
-Omit `-c` for the graphical interface:
+Omit `-c` for the normal graphical interface:
 
 ```bash
 python3 logsim/logsim.py examples/example1_mixed_combinational.txt
 ```
+
+Use `--3d` for the 3D trace visualisation method from `logsim/gui_3D.py`:
+
+```bash
+python3 logsim/logsim.py --3d examples/example1_mixed_combinational.txt
+```
+
+In the 3D GUI, run or continue the simulation first so traces exist, then drag the oscilloscope with the mouse to rotate it. Hold Shift while dragging to pan the 3D trace view, and use the mouse wheel over the oscilloscope to zoom.
 
 If `python3` cannot import `wx`, use the Python executable from the conda environment where `wxPython` is installed, for example:
 

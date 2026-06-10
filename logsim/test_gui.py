@@ -3,6 +3,7 @@
 import importlib
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -82,6 +83,19 @@ except ModuleNotFoundError as error:
     gui = importlib.import_module("gui")
 
 MyGLCanvas = gui.MyGLCanvas
+
+
+def test_gui_3d_module_exports_3d_gui_class():
+    """Test if the separate 3D GUI module wraps the standard GUI."""
+    sys.modules.pop("gui_3D", None)
+    module_path = Path(__file__).with_name("gui_3D.py")
+    spec = importlib.util.spec_from_file_location("gui_3D", module_path)
+    gui_3d = importlib.util.module_from_spec(spec)
+    sys.modules["gui_3D"] = gui_3d
+    spec.loader.exec_module(gui_3d)
+
+    assert issubclass(gui_3d.Gui3D, gui.Gui)
+    assert gui_3d.Gui is gui_3d.Gui3D
 
 
 class FakeNames:
