@@ -111,6 +111,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.trace_3d_pan_y = -4.0
         self.trace_3d_zoom = 1.0
         self.trace_3d_drag_active = False
+        self.circuit_display_3d = False
+        self.circuit_3d_rotate_x = 34.0
+        self.circuit_3d_rotate_y = -40.0
+        self.circuit_3d_zoom = 1.0
+        self.circuit_3d_drag_active = False
 
         self.left_margin = 150
         self.canvas_horizontal_padding = 36
@@ -181,6 +186,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.follow_latest_cycles = False
         self.view_mode = "split"
         self.reset_3d_trace_view()
+        self.reset_circuit_3d_view()
         self.init = False
         self.Refresh()
 
@@ -190,6 +196,20 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.trace_3d_drag_active = False
         self.init = False
         self.Refresh()
+
+    def set_circuit_display_3d(self, enabled):
+        """Switch the circuit overview between 2D and 3D perspective."""
+        self.circuit_display_3d = bool(enabled)
+        self.circuit_3d_drag_active = False
+        self.init = False
+        self.Refresh()
+
+    def reset_circuit_3d_view(self):
+        """Restore the 3D circuit camera to a readable default angle."""
+        self.circuit_3d_rotate_x = 34.0
+        self.circuit_3d_rotate_y = -40.0
+        self.circuit_3d_zoom = 1.0
+        self.circuit_3d_drag_active = False
 
     def set_view_mode(self, mode):
         """Show both views split, or maximise the circuit or oscilloscope."""
@@ -636,6 +656,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if view_width <= 0 or view_height <= 0:
             return
 
+        if self.circuit_display_3d:
+            self.circuit_geometry = {"view": view_bounds}
+            self.draw_3d_circuit(view_bounds)
+            return
+
         base_content_width, base_content_height = self.circuit_content_size(
             view_width, view_height
         )
@@ -678,6 +703,193 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.end_scissor()
         self.draw_circuit_scrollbars(view_bounds)
 
+    def draw_3d_circuit(self, view_bounds):
+        """Render the circuit as 3D blocks whose height shows live state.
+
+        Each device becomes a coloured tower (colour = device type, height =
+        its current output level), and connections are drawn as raised wires
+        across the floor.  The view can be rotated and zoomed with the mouse,
+        which makes the data-flow depth and the live signal levels easy to
+        read at a glance.
+        """
+        self.draw_rectangle(
+            view_bounds,
+            self.theme_colour("circuit_bg"),
+            self.theme_colour("circuit_border"),
+        )
+        viewport = self.canvas_pixel_rect(view_bounds)
+        if viewport is None:
+            return
+        content_width, content_height = self.circuit_content_size(
+            view_bounds[2], view_bounds[3]
+        )
+        positions = self.build_device_positions(
+            (0, 0, content_width, content_height)
+        )
+        if not positions:
+            return
+
+        layout = self.circuit_3d_layout(positions)
+        size = self.GetClientSize()
+        x_pos, y_pos, width, height = viewport
+        camera_distance, far_plane = self.fit_3d_camera_distance(
+            width, height, layout["span_x"], layout["span_z"], 40.0,
+            self.circuit_3d_rotate_x, self.circuit_3d_rotate_y,
+            self.circuit_3d_zoom, half_height=32.0, fov_y=40.0
+        )
+        try:
+            GL.glViewport(x_pos, y_pos, width, height)
+            GL.glEnable(GL.GL_SCISSOR_TEST)
+            GL.glScissor(x_pos, y_pos, width, height)
+            GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
+            GL.glEnable(GL.GL_DEPTH_TEST)
+            GL.glDepthFunc(GL.GL_LEQUAL)
+            GL.glMatrixMode(GL.GL_PROJECTION)
+            GL.glLoadIdentity()
+            GLU.gluPerspective(40.0, width / max(height, 1), 1.0, far_plane)
+            GL.glMatrixMode(GL.GL_MODELVIEW)
+            GL.glLoadIdentity()
+            GL.glTranslatef(0.0, -10.0, -camera_distance)
+            GL.glRotatef(self.circuit_3d_rotate_x, 1.0, 0.0, 0.0)
+            GL.glRotatef(self.circuit_3d_rotate_y, 0.0, 1.0, 0.0)
+            self.configure_3d_lighting()
+            self.draw_3d_circuit_floor(layout)
+            self.draw_3d_circuit_wires(layout)
+            self.draw_3d_circuit_blocks(layout)
+        finally:
+            GL.glLineWidth(1.0)
+            self.configure_2d_projection(size)
+
+    def circuit_3d_layout(self, positions):
+        """Return centred 3D coordinates for the blocks and their wires."""
+        centres = {}
+        for device_id, (px, py, pw, ph) in positions.items():
+            centres[device_id] = (px + pw / 2, py + ph / 2, pw)
+        xs = [centre[0] for centre in centres.values()]
+        zs = [centre[1] for centre in centres.values()]
+        mid_x = (min(xs) + max(xs)) / 2
+        mid_z = (min(zs) + max(zs)) / 2
+        scale = 0.6
+
+        blocks = {}
+        for device_id, (cxp, cyp, pw) in centres.items():
+            blocks[device_id] = (
+                (cxp - mid_x) * scale,
+                -(cyp - mid_z) * scale,
+                max(pw * scale / 2, 16.0),
+            )
+        wires = []
+        for target in self.devices.devices_list:
+            if target.device_id not in blocks:
+                continue
+            for input_id in self.sorted_port_ids(target.inputs):
+                connected = target.inputs[input_id]
+                if connected is None:
+                    continue
+                source_id, output_id = connected
+                if source_id not in blocks:
+                    continue
+                source = self.devices.get_device(source_id)
+                wires.append((source_id, target.device_id,
+                              source.outputs.get(output_id)))
+        return {
+            "blocks": blocks,
+            "wires": wires,
+            "span_x": max((max(xs) - min(xs)) * scale, 1.0),
+            "span_z": max((max(zs) - min(zs)) * scale, 1.0),
+        }
+
+    def circuit_block_height_3d(self, device):
+        """Return a 3D tower height that reflects the device output level."""
+        output_ids = self.sorted_port_ids(device.outputs)
+        if output_ids:
+            signal = device.outputs.get(output_ids[0])
+            if signal in (self.devices.HIGH, self.devices.RISING):
+                return 62.0
+            if signal in (self.devices.LOW, self.devices.FALLING):
+                return 18.0
+        return 34.0
+
+    def draw_3d_circuit_floor(self, layout):
+        """Draw the floor plane and grid beneath the 3D circuit blocks."""
+        half_x = layout["span_x"] / 2 + 50
+        half_z = layout["span_z"] / 2 + 50
+        GL.glDisable(GL.GL_LIGHTING)
+        self.set_colour(*self.theme_colour("grid_minor"))
+        GL.glBegin(GL.GL_QUADS)
+        GL.glVertex3f(-half_x, -0.4, half_z)
+        GL.glVertex3f(half_x, -0.4, half_z)
+        GL.glVertex3f(half_x, -0.4, -half_z)
+        GL.glVertex3f(-half_x, -0.4, -half_z)
+        GL.glEnd()
+
+        self.set_colour(*self.theme_colour("grid_row"))
+        GL.glLineWidth(1.0)
+        GL.glBegin(GL.GL_LINES)
+        line_x = -half_x
+        while line_x <= half_x:
+            GL.glVertex3f(line_x, 0.0, -half_z)
+            GL.glVertex3f(line_x, 0.0, half_z)
+            line_x += 60.0
+        line_z = -half_z
+        while line_z <= half_z:
+            GL.glVertex3f(-half_x, 0.0, line_z)
+            GL.glVertex3f(half_x, 0.0, line_z)
+            line_z += 60.0
+        GL.glEnd()
+
+    def draw_3d_circuit_wires(self, layout):
+        """Draw connections as raised right-angled wires across the floor."""
+        GL.glDisable(GL.GL_LIGHTING)
+        GL.glLineWidth(1.8)
+        wire_y = 4.0
+        for source_id, target_id, signal in layout["wires"]:
+            source_x, source_z, _ = layout["blocks"][source_id]
+            target_x, target_z, _ = layout["blocks"][target_id]
+            self.set_colour(*self.signal_colour(signal))
+            GL.glBegin(GL.GL_LINE_STRIP)
+            GL.glVertex3f(source_x, wire_y, source_z)
+            GL.glVertex3f(target_x, wire_y, source_z)
+            GL.glVertex3f(target_x, wire_y, target_z)
+            GL.glEnd()
+        GL.glLineWidth(1.0)
+
+    def draw_3d_circuit_blocks(self, layout):
+        """Draw each device as a coloured 3D block sized by its signal."""
+        half_depth = 16.0
+        for device in self.devices.devices_list:
+            block = layout["blocks"].get(device.device_id)
+            if block is None:
+                continue
+            block_x, block_z, half_width = block
+            height = self.circuit_block_height_3d(device)
+            self.set_colour(*self.device_fill_colour(device))
+            self.draw_3d_cuboid(block_x, block_z, half_width, half_depth,
+                                height)
+            self.draw_3d_circuit_label(device, block_x, block_z, half_width,
+                                       half_depth, height)
+
+    def draw_3d_circuit_label(self, device, block_x, block_z, half_width,
+                              half_depth, height):
+        """Draw a device name laid flat on top of its 3D block."""
+        name = str(self.devices.names.get_name_string(device.device_id))
+        font = GLUT.GLUT_STROKE_ROMAN
+        width_units = sum(
+            GLUT.glutStrokeWidth(font, ord(character)) for character in name
+        ) or 1.0
+        scale = min((half_width * 2 - 6) / width_units, 0.13)
+        GL.glDisable(GL.GL_LIGHTING)
+        self.set_colour(*self.theme_colour("text"))
+        GL.glPushMatrix()
+        GL.glTranslatef(block_x - half_width + 4, height + 0.5,
+                        block_z + half_depth - 4)
+        GL.glRotatef(-90.0, 1.0, 0.0, 0.0)
+        GL.glScalef(scale, scale, scale)
+        GL.glLineWidth(1.0)
+        for character in name:
+            GLUT.glutStrokeCharacter(font, ord(character))
+        GL.glPopMatrix()
+
     def circuit_metrics(self):
         """Return shared sizing for circuit layout and routing.
 
@@ -709,13 +921,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "max_layer": max_layer,
             "total_rows": total_rows,
             "block_width": min(190, max(116, longest_name * 8 + 26)),
-            "band_height": max(40, max_pins * self.circuit_pin_spacing + 16),
+            "band_height": max(50, max_pins * self.circuit_pin_spacing + 20),
         }
 
     def device_block_height(self, device):
         """Return the drawn height of a device, sized for its pin count."""
         pins = max(len(device.inputs), len(device.outputs), 1)
-        return max(34, pins * self.circuit_pin_spacing + 12)
+        return max(46, pins * self.circuit_pin_spacing + 16)
 
     def build_device_positions(self, bounds):
         """Return a grid layout with devices aligned to shared rows."""
@@ -1053,10 +1265,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             bounds, fill_colour, self.theme_colour("device_border")
         )
         self.render_scaled_text(
-            name, x_pos + 8, y_pos + height - 19, 13, width - 16
+            name, x_pos + 8, y_pos + height - 16, 13, width - 16
         )
         self.render_scaled_text(
-            kind, x_pos + 8, y_pos + 6, 11, width - 16,
+            kind, x_pos + 8, y_pos + height - 33, 9, width - 16,
             self.theme_colour("subtle_text")
         )
 
@@ -1385,24 +1597,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 self.theme_colour("subtle_text")
             )
 
-    def fit_3d_camera_distance(self, width, height, cycle_span, row_span,
-                               row_depth):
+    def fit_3d_camera_distance(self, width, height, span_x, span_z, depth,
+                               rotate_x_deg, rotate_y_deg, zoom,
+                               half_height=9.0, fov_y=35.0):
         """Return a camera distance and far plane that frame the whole scene.
 
-        The rotated bounding box of the raised signal blocks is projected onto
-        the horizontal and vertical fields of view, so the entire 3D trace is
-        framed snugly at the current viewing angle without any part being
-        clipped off the edges of the panel.
+        The rotated bounding box of the scene is projected onto the horizontal
+        and vertical fields of view, so the whole 3D model is framed snugly at
+        the current viewing angle without any part being clipped off the edges
+        of the panel.
         """
-        half_fov_y = math.radians(35.0 / 2.0)
+        half_fov_y = math.radians(fov_y / 2.0)
         tan_y = math.tan(half_fov_y)
         tan_x = tan_y * (width / max(height, 1))
 
-        half_width = cycle_span / 2.0
-        half_height = 9.0
-        half_depth = row_span / 2.0 + row_depth
-        rotate_x = math.radians(self.trace_3d_rotate_x)
-        rotate_y = math.radians(self.trace_3d_rotate_y)
+        half_width = span_x / 2.0
+        half_depth = span_z / 2.0 + depth
+        rotate_x = math.radians(rotate_x_deg)
+        rotate_y = math.radians(rotate_y_deg)
 
         max_x = max_y = max_z = 0.0
         for sign_x in (-1.0, 1.0):
@@ -1418,7 +1630,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         fit_distance = max(max_x / tan_x, max_y / tan_y) + max_z
         fit_distance = max(fit_distance, 120.0)
-        camera_distance = fit_distance * 1.12 / max(self.trace_3d_zoom, 0.2)
+        camera_distance = fit_distance * 1.12 / max(zoom, 0.2)
         far_plane = camera_distance + max_z + 200.0
         return camera_distance, far_plane
 
@@ -1459,7 +1671,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         cycle_span = cycle_count * cycle_pitch
         row_span = max(row_count - 1, 0) * row_pitch
         camera_distance, far_plane = self.fit_3d_camera_distance(
-            width, height, cycle_span, row_span, row_depth
+            width, height, cycle_span, row_span, row_depth,
+            self.trace_3d_rotate_x, self.trace_3d_rotate_y, self.trace_3d_zoom
         )
         aspect = width / max(height, 1)
 
@@ -2165,12 +2378,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
+            if self.start_circuit_3d_drag(object_x, object_y):
+                return
             if self.start_circuit_scroll_drag(object_x, object_y):
                 return
             if self.start_scope_scroll_drag(object_x, object_y):
                 return
             if self.start_3d_trace_drag(object_x, object_y):
                 return
+
+        if event.Dragging() and self.circuit_3d_drag_active:
+            self.update_circuit_3d_drag(event)
+            self.Refresh()
+            return
 
         if event.Dragging() and self.circuit_drag_mode is not None:
             self.update_circuit_scroll_drag(object_x, object_y)
@@ -2191,6 +2411,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_drag_mode = None
             self.scope_drag_mode = None
             self.trace_3d_drag_active = False
+            self.circuit_3d_drag_active = False
 
         wheel_rotation = event.GetWheelRotation()
         if wheel_rotation != 0 and self.wheel_circuit(
@@ -2210,6 +2431,28 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         ):
             self.Refresh()
             return
+
+    def start_circuit_3d_drag(self, x_pos, y_pos):
+        """Start rotating the 3D circuit view when it is clicked."""
+        if not self.circuit_display_3d:
+            return False
+        if not self.point_in_rect(x_pos, y_pos,
+                                  self.circuit_geometry.get("view")):
+            return False
+
+        self.circuit_3d_drag_active = True
+        return True
+
+    def update_circuit_3d_drag(self, event):
+        """Rotate the 3D circuit camera during a mouse drag."""
+        x_delta = event.GetX() - self.last_mouse_x
+        y_delta = event.GetY() - self.last_mouse_y
+        self.last_mouse_x = event.GetX()
+        self.last_mouse_y = event.GetY()
+        self.circuit_3d_rotate_y += x_delta * 0.5
+        self.circuit_3d_rotate_x = self.clamp(
+            self.circuit_3d_rotate_x + y_delta * 0.5, 8.0, 82.0
+        )
 
     def start_3d_trace_drag(self, x_pos, y_pos):
         """Start rotating or panning the 3D trace view when clicked."""
@@ -2331,6 +2574,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if not self.point_in_rect(x_pos, y_pos,
                                   self.circuit_geometry.get("view")):
             return False
+        if self.circuit_display_3d:
+            factor = 1.12 if wheel_rotation > 0 else 1.0 / 1.12
+            self.circuit_3d_zoom = self.clamp(
+                self.circuit_3d_zoom * factor, 0.3, 3.5
+            )
+            return True
         if wx.GetKeyState(wx.WXK_SHIFT):
             return self.scroll_circuit_view(x_pos, y_pos, wheel_rotation)
         factor = 1.1 if wheel_rotation > 0 else 1.0 / 1.1
@@ -2654,6 +2903,7 @@ class Gui(wx.Frame):
             self.add_monitor_button, self.remove_monitor_button,
             self.reset_view_button, self.circuit_fit_button,
             self.scope_fit_button, self.trace_display_button,
+            self.circuit_3d_button,
             self.maximise_circuit_button, self.maximise_scope_button,
         ]
         fields = [
@@ -2812,6 +3062,9 @@ class Gui(wx.Frame):
         self.trace_display_button = wx.ToggleButton(
             self, wx.ID_ANY, self.t("trace_display_3d")
         )
+        self.circuit_3d_button = wx.ToggleButton(
+            self, wx.ID_ANY, self.t("circuit_3d")
+        )
         self.maximise_label = wx.StaticText(
             self, wx.ID_ANY, self.t("maximise")
         )
@@ -2913,9 +3166,13 @@ class Gui(wx.Frame):
         view_box.Add(maximise_sizer, 0, wx.EXPAND | wx.ALL, 6)
         view_box.Add(self.fit_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         view_box.Add(fit_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        trace_3d_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        trace_3d_sizer.Add(self.trace_display_button, 1,
+                           wx.EXPAND | wx.RIGHT, 4)
+        trace_3d_sizer.Add(self.circuit_3d_button, 1, wx.EXPAND)
         view_box.Add(self.trace_display_label, 0,
                      wx.LEFT | wx.RIGHT, 6)
-        view_box.Add(self.trace_display_button, 0, wx.EXPAND | wx.ALL, 6)
+        view_box.Add(trace_3d_sizer, 0, wx.EXPAND | wx.ALL, 6)
 
         readings_box.Add(self.readings_list, 1, wx.EXPAND | wx.ALL, 6)
         log_box.Add(self.log_text, 1, wx.EXPAND | wx.ALL, 6)
@@ -2959,6 +3216,7 @@ class Gui(wx.Frame):
             self.maximise_scope_button,
             self.fit_label, self.circuit_fit_button, self.scope_fit_button,
             self.trace_display_label, self.trace_display_button,
+            self.circuit_3d_button,
         ]:
             control.Reparent(self.view_box)
 
@@ -3003,6 +3261,9 @@ class Gui(wx.Frame):
         self.trace_display_button.Bind(
             wx.EVT_TOGGLEBUTTON, self.on_trace_display_button
         )
+        self.circuit_3d_button.Bind(
+            wx.EVT_TOGGLEBUTTON, self.on_circuit_3d_button
+        )
         self.maximise_circuit_button.Bind(
             wx.EVT_TOGGLEBUTTON, self.on_maximise_circuit_button
         )
@@ -3028,6 +3289,15 @@ class Gui(wx.Frame):
             self.set_status(self.t("trace_display_3d_enabled"))
         else:
             self.set_status(self.t("trace_display_2d_enabled"))
+
+    def on_circuit_3d_button(self, event):
+        """Switch the circuit overview between 2D and 3D."""
+        enabled = self.circuit_3d_button.GetValue()
+        self.canvas.set_circuit_display_3d(enabled)
+        if enabled:
+            self.set_status(self.t("circuit_3d_enabled"))
+        else:
+            self.set_status(self.t("circuit_3d_disabled"))
 
     def on_maximise_circuit_button(self, event):
         """Maximise the circuit overview, or restore the split view."""
@@ -3197,6 +3467,7 @@ class Gui(wx.Frame):
         self.scope_fit_button.SetLabel(self.t("maximise_scope"))
         self.trace_display_label.SetLabel(self.t("trace_display"))
         self.trace_display_button.SetLabel(self.t("trace_display_3d"))
+        self.circuit_3d_button.SetLabel(self.t("circuit_3d"))
         self.maximise_label.SetLabel(self.t("maximise"))
         self.maximise_circuit_button.SetLabel(self.t("maximise_circuit"))
         self.maximise_scope_button.SetLabel(self.t("maximise_scope"))
