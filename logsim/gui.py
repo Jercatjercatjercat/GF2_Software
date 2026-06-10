@@ -770,6 +770,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.draw_3d_circuit_floor(layout)
             self.draw_3d_circuit_wires(layout, positions)
             self.draw_3d_circuit_blocks(layout)
+            self.draw_3d_circuit_pins(layout, positions)
         finally:
             GL.glLineWidth(1.0)
             self.configure_2d_projection(size)
@@ -841,11 +842,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
 
     def draw_3d_circuit_wires(self, layout, positions):
-        """Draw the orthogonal 2D routes mapped onto the 3D floor.
+        """Draw the orthogonal 2D routes as raised conduits on the 3D floor.
 
         Reusing the 2D router gives the 3D wires the same per-wire lanes and
         the same distinct input-pin connections, so they stay unambiguous and
-        never sit on top of one another.
+        never sit on top of one another, while a little height and thickness
+        makes them read as solid wires rather than flat lines.
         """
         grid = getattr(self, "circuit_grid", None)
         if not grid:
@@ -853,17 +855,62 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         mid_x = layout["mid_x"]
         mid_z = layout["mid_z"]
         scale = layout["scale"]
-        wire_y = 4.0
-        GL.glDisable(GL.GL_LIGHTING)
-        GL.glLineWidth(1.8)
         for points, signal in self.circuit_wire_paths(positions, grid):
             self.set_colour(*self.signal_colour(signal))
-            GL.glBegin(GL.GL_LINE_STRIP)
-            for point_x, point_y in points:
-                GL.glVertex3f((point_x - mid_x) * scale, wire_y,
-                              -(point_y - mid_z) * scale)
-            GL.glEnd()
-        GL.glLineWidth(1.0)
+            floor_points = [
+                ((point_x - mid_x) * scale, -(point_y - mid_z) * scale)
+                for point_x, point_y in points
+            ]
+            for start, end in zip(floor_points, floor_points[1:]):
+                self.draw_3d_wire_segment(start[0], start[1], end[0], end[1])
+
+    def draw_3d_wire_segment(self, x_start, z_start, x_end, z_end):
+        """Draw one axis-aligned wire segment as a thin raised bar."""
+        half = 1.6
+        height = 5.0
+        if abs(x_end - x_start) >= abs(z_end - z_start):
+            centre_x = (x_start + x_end) / 2
+            centre_z = z_start
+            half_width = abs(x_end - x_start) / 2 + half
+            half_depth = half
+        else:
+            centre_x = x_start
+            centre_z = (z_start + z_end) / 2
+            half_width = half
+            half_depth = abs(z_end - z_start) / 2 + half
+        self.draw_3d_cuboid(centre_x, centre_z, half_width, half_depth, height)
+
+    def draw_3d_circuit_pins(self, layout, positions):
+        """Draw spheres at every input and output pin, as in the 2D view."""
+        mid_x = layout["mid_x"]
+        mid_z = layout["mid_z"]
+        scale = layout["scale"]
+        pin_y = 4.5
+        quadric = GLU.gluNewQuadric()
+        GL.glEnable(GL.GL_LIGHTING)
+        for device in self.devices.devices_list:
+            position = positions.get(device.device_id)
+            if position is None:
+                continue
+            for input_id in self.sorted_port_ids(device.inputs):
+                pin_x, pin_z = self.input_pin(position, device, input_id)
+                self.set_colour(0.97, 0.97, 0.99)
+                self.draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
+                                    -(pin_z - mid_z) * scale, 3.0)
+            for output_id in self.sorted_port_ids(device.outputs):
+                pin_x, pin_z = self.output_pin(position, device, output_id)
+                signal = device.outputs.get(output_id)
+                self.set_colour(*self.signal_colour(signal))
+                self.draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
+                                    -(pin_z - mid_z) * scale, 4.2)
+        GLU.gluDeleteQuadric(quadric)
+
+    def draw_3d_sphere(self, quadric, x_pos, y_pos, z_pos, radius):
+        """Draw a lit sphere of the current colour at a 3D point."""
+        GL.glPushMatrix()
+        GL.glTranslatef(x_pos, y_pos, z_pos)
+        GLU.gluSphere(quadric, radius, 12, 8)
+        GL.glPopMatrix()
 
     def draw_3d_circuit_blocks(self, layout):
         """Draw each device as a coloured 3D block sized by its signal."""
