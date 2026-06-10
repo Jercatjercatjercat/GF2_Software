@@ -5,6 +5,8 @@ switch, add a monitor, and remove a monitor.  Signal traces are drawn in an
 OpenGL canvas and can be panned or zoomed with the mouse.
 """
 
+from __future__ import annotations
+
 import math
 import os
 import shutil
@@ -33,7 +35,10 @@ from parse import Parser, parse_network_with_diagnostics
 from gui_controller import GuiController
 
 
-def show_parse_error_dialog(parent, path, diagnostics, language_code=None):
+def show_parse_error_dialog(
+    parent: wx.Window | None, path: str, diagnostics: str,
+    language_code: str | None = None,
+) -> None:
     """Show parser diagnostics in the GUI as well as the terminal."""
     translations = load_translations()
     if language_code not in translations:
@@ -59,9 +64,67 @@ def show_parse_error_dialog(parent, path, diagnostics, language_code=None):
 
 
 class MyGLCanvas(wxcanvas.GLCanvas):
-    """Draw monitor waveforms in an OpenGL canvas."""
+    """Handle all drawing operations on the simulator canvas.
 
-    def __init__(self, parent, devices, monitors, translator=None):
+    The canvas shows two views at once: a routed circuit overview and an
+    oscilloscope of the monitored signal traces.  Both views have a 2D
+    and a perspective 3D mode, and the mouse can zoom, scroll, rotate,
+    and pan them; hovering a 3D trace names its signal.  Either view can
+    also be exported as a PNG image or a single-page PDF.
+
+    Parameters
+    ----------
+    parent: parent window containing this canvas.
+    devices: instance of the devices.Devices class.
+    monitors: instance of the monitors.Monitors class.
+    translator: optional function mapping a text key to UI text in the
+                current language.
+
+    Public methods
+    --------------
+    init_gl(self): Configures the OpenGL context.
+
+    render(self, swap=True): Draws the circuit overview and the
+                             oscilloscope traces.
+
+    on_paint(self, event): Handles the canvas paint event.
+
+    on_size(self, event): Handles the canvas resize event.
+
+    on_mouse(self, event): Handles mouse events for zooming, scrolling,
+                           rotating, and hovering.
+
+    render_text(self, text, x_pos, y_pos, colour=None): Draws bitmap
+                           text at a fixed pixel size.
+
+    set_translator(self, translator): Sets the canvas text translator.
+
+    reset_view(self): Resets pan, zoom, and scroll state to defaults.
+
+    set_trace_display_3d(self, enabled): Switches 2D or 3D traces.
+
+    set_circuit_display_3d(self, enabled): Switches 2D or 3D circuit.
+
+    set_view_mode(self, mode): Shows both views split, or maximises one.
+
+    minimum_visual_size(self): Returns the minimum readable canvas size.
+
+    fit_circuit(self): Fits the whole circuit into its viewport.
+
+    fit_scope(self): Fits all rows and cycles into the oscilloscope.
+
+    set_dark_mode(self, enabled): Applies light or dark canvas colours.
+
+    set_colour_blind_mode(self, enabled): Applies accessible colours.
+
+    save_circuit_image(self, path): Saves the circuit view to PNG/PDF.
+
+    save_scope_image(self, path): Saves the oscilloscope to PNG/PDF.
+    """
+
+    def __init__(self, parent: wx.Window, devices: Devices,
+                 monitors: Monitors,
+                 translator: object = None) -> None:
         """Initialise canvas state and event bindings."""
         super().__init__(
             parent,
@@ -164,19 +227,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
 
-    def set_translator(self, translator):
+    def set_translator(self, translator: object) -> None:
         """Set the function used for canvas UI text."""
         self.translator = translator
         self.Refresh()
 
-    def text(self, key):
+    def _text(self, key):
         """Return translated canvas text."""
         translator = getattr(self, "translator", None)
         if translator is None:
             return translate(load_translations(), DEFAULT_LANGUAGE, key)
         return translator(key)
 
-    def reset_view(self):
+    def reset_view(self) -> None:
         """Reset pan, zoom, and oscilloscope scroll to their defaults."""
         self.pan_x = 0
         self.pan_y = 0
@@ -192,26 +255,26 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_drag_mode = None
         self.follow_latest_cycles = False
         self.view_mode = "split"
-        self.reset_3d_trace_view()
-        self.reset_circuit_3d_view()
+        self._reset_3d_trace_view()
+        self._reset_circuit_3d_view()
         self.init = False
         self.Refresh()
 
-    def set_trace_display_3d(self, enabled):
+    def set_trace_display_3d(self, enabled: bool) -> None:
         """Switch between conventional 2D and perspective 3D traces."""
         self.trace_display_3d = bool(enabled)
         self.trace_3d_drag_active = False
         self.init = False
         self.Refresh()
 
-    def set_circuit_display_3d(self, enabled):
+    def set_circuit_display_3d(self, enabled: bool) -> None:
         """Switch the circuit overview between 2D and 3D perspective."""
         self.circuit_display_3d = bool(enabled)
         self.circuit_3d_drag_active = False
         self.init = False
         self.Refresh()
 
-    def reset_circuit_3d_view(self):
+    def _reset_circuit_3d_view(self):
         """Restore the 3D circuit camera to a readable default angle."""
         self.circuit_3d_rotate_x = 34.0
         self.circuit_3d_rotate_y = -40.0
@@ -220,7 +283,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_3d_zoom = 1.0
         self.circuit_3d_drag_active = False
 
-    def set_view_mode(self, mode):
+    def set_view_mode(self, mode: str) -> None:
         """Show both views split, or maximise the circuit or oscilloscope."""
         if mode not in ("split", "circuit", "scope"):
             mode = "split"
@@ -228,7 +291,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.init = False
         self.Refresh()
 
-    def reset_3d_trace_view(self):
+    def _reset_3d_trace_view(self):
         """Restore the 3D trace camera to a readable default view."""
         self.trace_3d_rotate_x = 28.0
         self.trace_3d_rotate_y = -34.0
@@ -237,7 +300,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.trace_3d_zoom = 1.0
         self.trace_3d_drag_active = False
 
-    def minimum_visual_size(self):
+    def minimum_visual_size(self) -> tuple[int, int]:
         """Return the minimum canvas size that keeps both views readable."""
         min_width = self.min_view_width + self.canvas_horizontal_padding
         min_height = (
@@ -246,24 +309,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         )
         return min_width, min_height
 
-    def zoom_circuit(self, factor):
+    def _zoom_circuit(self, factor):
         """Zoom the circuit overview around its current scroll position."""
         old_zoom = self.circuit_zoom
-        self.circuit_zoom = self.clamp(self.circuit_zoom * factor, 0.1, 3.0)
+        self.circuit_zoom = self._clamp(self.circuit_zoom * factor, 0.1, 3.0)
         if self.circuit_zoom != old_zoom:
             self.circuit_scroll_x *= self.circuit_zoom / old_zoom
             self.circuit_scroll_y *= self.circuit_zoom / old_zoom
         self.Refresh()
 
-    def zoom_circuit_at(self, factor, cursor_x, cursor_y):
+    def _zoom_circuit_at(self, factor, cursor_x, cursor_y):
         """Zoom the circuit toward the cursor so it stays under the mouse."""
         view = self.circuit_geometry.get("view")
         content = getattr(self, "last_circuit_content", None)
         if not view or not content:
-            self.zoom_circuit(factor)
+            self._zoom_circuit(factor)
             return
         old_zoom = self.circuit_zoom
-        new_zoom = self.clamp(old_zoom * factor, 0.1, 3.0)
+        new_zoom = self._clamp(old_zoom * factor, 0.1, 3.0)
         if new_zoom == old_zoom:
             return
         view_x, view_y, view_width, view_height = view
@@ -277,7 +340,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         base_y = (cursor_y - origin_y) / old_zoom
 
         self.circuit_zoom = new_zoom
-        self.circuit_scroll_x = self.clamp(
+        self.circuit_scroll_x = self._clamp(
             view_x + base_x * new_zoom - cursor_x,
             0, max(base_width * new_zoom - view_width, 0)
         )
@@ -285,17 +348,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             cursor_y - view_y - view_height
             + (base_height - base_y) * new_zoom
         )
-        self.circuit_scroll_y = self.clamp(
+        self.circuit_scroll_y = self._clamp(
             scroll_y, 0, max(base_height * new_zoom - view_height, 0)
         )
         self.Refresh()
 
-    def zoom_circuit_3d_at(self, factor, cursor_x, cursor_y):
+    def _zoom_circuit_3d_at(self, factor, cursor_x, cursor_y):
         """Zoom the 3D circuit toward the cursor under the mouse."""
         old_zoom = self.circuit_3d_zoom
-        new_zoom = self.clamp(old_zoom * factor, 0.3, 3.5)
+        new_zoom = self._clamp(old_zoom * factor, 0.3, 3.5)
         if new_zoom != old_zoom:
-            shift_x, shift_y = self.circuit_3d_zoom_pan_shift(
+            shift_x, shift_y = self._circuit_3d_zoom_pan_shift(
                 old_zoom, new_zoom, cursor_x, cursor_y
             )
             self.circuit_3d_pan_x += shift_x
@@ -303,8 +366,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_3d_zoom = new_zoom
         self.Refresh()
 
-    def circuit_3d_zoom_pan_shift(self, old_zoom, new_zoom,
-                                  cursor_x, cursor_y):
+    def _circuit_3d_zoom_pan_shift(self, old_zoom, new_zoom,
+                                   cursor_x, cursor_y):
         """Return the pan shift that keeps the cursor point fixed when zooming.
 
         Zooming changes the camera distance, which would otherwise slide the
@@ -331,16 +394,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return (ndc_x * tan_x * distance_delta,
                 ndc_y * tan_y * distance_delta)
 
-    def fit_circuit(self):
+    def fit_circuit(self) -> None:
         """Fit the whole circuit into the view (2D), or re-frame it (3D)."""
         if self.circuit_display_3d:
-            self.reset_circuit_3d_view()
+            self._reset_circuit_3d_view()
             self.Refresh()
             return
         view = getattr(self, "last_circuit_view", None)
         content = getattr(self, "last_circuit_content", None)
         if view and content and content[0] > 0 and content[1] > 0:
-            self.circuit_zoom = self.clamp(
+            self.circuit_zoom = self._clamp(
                 min(view[0] / content[0], view[1] / content[1]) * 0.97,
                 0.08, 1.0
             )
@@ -350,72 +413,72 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_scroll_y = 0
         self.Refresh()
 
-    def zoom_scope(self, factor):
+    def _zoom_scope(self, factor):
         """Zoom the oscilloscope time axis in or out."""
-        self.scope_cycle_zoom = self.clamp(
+        self.scope_cycle_zoom = self._clamp(
             self.scope_cycle_zoom * factor, 0.1, 4.0
         )
         self.follow_latest_cycles = False
         if self.trace_display_3d:
-            self.trace_3d_zoom = self.clamp(
+            self.trace_3d_zoom = self._clamp(
                 self.trace_3d_zoom * factor, 0.25, 4.0
             )
         self.Refresh()
 
-    def zoom_scope_rows(self, factor):
+    def _zoom_scope_rows(self, factor):
         """Zoom the oscilloscope vertically to show fewer or more signals."""
-        self.scope_row_zoom = self.clamp(
+        self.scope_row_zoom = self._clamp(
             self.scope_row_zoom * factor, 0.2, 3.0
         )
         self.Refresh()
 
-    def fit_scope(self):
+    def fit_scope(self) -> None:
         """Frame the whole oscilloscope so all of it is visible at once."""
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.follow_latest_cycles = False
-        self.scope_row_zoom = self.fit_row_zoom()
+        self.scope_row_zoom = self._fit_row_zoom()
         if self.trace_display_3d:
             # Hundreds of blocks are never legible in 3D, so reset to a
             # readable time window and re-frame the perspective camera.
             self.scope_cycle_zoom = 1.0
-            self.reset_3d_trace_view()
+            self._reset_3d_trace_view()
             self.Refresh()
             return
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        max_cycles = self.max_recorded_cycles(monitor_items)
+        max_cycles = self._max_recorded_cycles(monitor_items)
         plot_width = getattr(self, "last_scope_plot_width", 0)
         if max_cycles > 0 and plot_width > 0:
             target_cycle_width = plot_width / max_cycles
-            self.scope_cycle_zoom = self.clamp(
+            self.scope_cycle_zoom = self._clamp(
                 target_cycle_width / self.default_cycle_width, 0.02, 1.0
             )
         else:
             self.scope_cycle_zoom = 0.25
         self.Refresh()
 
-    def fit_row_zoom(self):
+    def _fit_row_zoom(self):
         """Return the vertical zoom that fits every monitor row on screen."""
         total_rows = len(self.monitors.monitors_dictionary)
         plot_height = getattr(self, "last_scope_plot_height", 0)
         if total_rows <= 0 or plot_height <= 0:
             return 1.0
-        return self.clamp(
+        return self._clamp(
             plot_height / (self.row_height * total_rows), 0.2, 1.0
         )
 
-    def set_dark_mode(self, enabled):
+    def set_dark_mode(self, enabled: bool) -> None:
         """Apply dark or light drawing colours to the canvas."""
         self.dark_mode = enabled
         self.init = False
         self.Refresh()
 
-    def set_colour_blind_mode(self, enabled):
+    def set_colour_blind_mode(self, enabled: bool) -> None:
         """Apply colour-blind-safe signal colours to the canvas."""
         self.colour_blind_mode = enabled
         self.Refresh()
 
-    def theme_colour(self, key):
+    def _theme_colour(self, key: str) -> tuple[float, float, float]:
         """Return an OpenGL colour from the current canvas theme."""
         light_colours = {
             "canvas_bg": (0.96, 0.97, 0.98),
@@ -484,15 +547,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         colours = dark_colours if self.dark_mode else light_colours
         return colours[key]
 
-    def init_gl(self):
+    def init_gl(self) -> None:
         """Configure the OpenGL projection for the current canvas size."""
         size = self.GetClientSize()
         self.SetCurrent(self.context)
         GL.glDrawBuffer(GL.GL_BACK)
-        GL.glClearColor(*self.theme_colour("canvas_bg"), 0.0)
-        self.configure_2d_projection(size)
+        GL.glClearColor(*self._theme_colour("canvas_bg"), 0.0)
+        self._configure_2d_projection(size)
 
-    def configure_2d_projection(self, size):
+    def _configure_2d_projection(self, size):
         """Configure canvas-space orthographic drawing."""
         GL.glViewport(0, 0, size.width, size.height)
         GL.glDisable(GL.GL_DEPTH_TEST)
@@ -506,7 +569,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glTranslated(self.pan_x, self.pan_y, 0.0)
         GL.glScaled(self.zoom, self.zoom, self.zoom)
 
-    def render(self, swap=True):
+    def render(self, swap: bool = True) -> None:
         """Draw the circuit overview and oscilloscope-style traces."""
         self.SetCurrent(self.context)
         if not self.init:
@@ -519,31 +582,31 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
 
         monitor_items = list(self.monitors.monitors_dictionary.items())
-        circuit_bounds, scope_bounds = self.calculate_display_bounds(size)
+        circuit_bounds, scope_bounds = self._calculate_display_bounds(size)
 
-        self.draw_canvas_grid(size)
+        self._draw_canvas_grid(size)
         if circuit_bounds is not None:
             self.last_circuit_bounds = circuit_bounds
-            self.draw_circuit_overview(circuit_bounds)
+            self._draw_circuit_overview(circuit_bounds)
         if scope_bounds is not None:
             if self.trace_display_3d:
-                self.draw_3d_oscilloscope(scope_bounds, monitor_items)
+                self._draw_3d_oscilloscope(scope_bounds, monitor_items)
             else:
-                self.draw_oscilloscope(scope_bounds, monitor_items)
-        self.finish_render(swap)
+                self._draw_oscilloscope(scope_bounds, monitor_items)
+        self._finish_render(swap)
 
-    def calculate_display_bounds(self, size):
+    def _calculate_display_bounds(self, size):
         """Return circuit and oscilloscope bounds for the active view mode."""
         available_width = max(1, size.width - self.canvas_horizontal_padding)
         view_mode = getattr(self, "view_mode", "split")
 
         if view_mode == "circuit":
-            return self.maximised_view_bounds(size, available_width), None
+            return self._maximised_view_bounds(size, available_width), None
         if view_mode == "scope":
-            return None, self.maximised_view_bounds(size, available_width)
-        return self.split_view_bounds(size, available_width)
+            return None, self._maximised_view_bounds(size, available_width)
+        return self._split_view_bounds(size, available_width)
 
-    def maximised_view_bounds(self, size, available_width):
+    def _maximised_view_bounds(self, size, available_width):
         """Return bounds that fill the canvas for a single maximised view."""
         height = max(
             self.min_scope_height,
@@ -551,7 +614,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         )
         return (18, self.scope_y, available_width, height)
 
-    def split_view_bounds(self, size, available_width):
+    def _split_view_bounds(self, size, available_width):
         """Split the canvas so the oscilloscope fills the lower region.
 
         The circuit overview is kept only as tall as its contents need so
@@ -566,7 +629,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             available, self.min_circuit_height + self.min_scope_height
         )
         desired_circuit_height = max(
-            self.estimate_circuit_height(), self.min_circuit_height
+            self._estimate_circuit_height(), self.min_circuit_height
         )
         circuit_cap = max(
             self.min_circuit_height,
@@ -583,21 +646,21 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         circuit_bounds = (18, circuit_y, available_width, circuit_height)
         return circuit_bounds, scope_bounds
 
-    def finish_render(self, swap=True):
+    def _finish_render(self, swap=True):
         """Flush drawing commands and optionally swap buffers."""
         GL.glFlush()
         if swap:
             self.SwapBuffers()
 
-    def save_circuit_image(self, path):
+    def save_circuit_image(self, path: str) -> bool:
         """Save the currently displayed circuit overview."""
-        return self.save_region_image(path, self.last_circuit_bounds)
+        return self._save_region_image(path, self.last_circuit_bounds)
 
-    def save_scope_image(self, path):
+    def save_scope_image(self, path: str) -> bool:
         """Save the currently displayed oscilloscope."""
-        return self.save_region_image(path, self.last_scope_bounds)
+        return self._save_region_image(path, self.last_scope_bounds)
 
-    def save_region_image(self, path, bounds):
+    def _save_region_image(self, path, bounds):
         """Save part of the canvas as a PNG image or one-page PDF."""
         self.render(swap=False)
         try:
@@ -631,7 +694,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
 
             if path.lower().endswith(".pdf"):
-                self.write_image_pdf(path, width, height, image_data)
+                self._write_image_pdf(path, width, height, image_data)
                 return True
 
             image = wx.Image(width, height)
@@ -640,7 +703,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         finally:
             self.SwapBuffers()
 
-    def write_image_pdf(self, path, image_width, image_height, image_data):
+    def _write_image_pdf(self, path, image_width, image_height, image_data):
         """Write RGB image data to a one-page PDF."""
         if image_width >= image_height:
             page_width, page_height = 842, 595
@@ -660,10 +723,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         compressed_image = zlib.compress(image_data)
         content = (
             "q\n"
-            + self.pdf_number(draw_width) + " 0 0 "
-            + self.pdf_number(draw_height) + " "
-            + self.pdf_number(draw_x) + " "
-            + self.pdf_number(draw_y) + " cm\n"
+            + self._pdf_number(draw_width) + " 0 0 "
+            + self._pdf_number(draw_height) + " "
+            + self._pdf_number(draw_x) + " "
+            + self._pdf_number(draw_y) + " cm\n"
             + "/Im0 Do\nQ\n"
         ).encode("ascii")
 
@@ -688,11 +751,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             ).encode("ascii") + content + b"endstream",
         ]
 
-        pdf_data = self.build_pdf(objects)
+        pdf_data = self._build_pdf(objects)
         with open(path, "wb") as pdf_file:
             pdf_file.write(pdf_data)
 
-    def build_pdf(self, objects):
+    def _build_pdf(self, objects: list[bytes]) -> bytes:
         """Build a minimal PDF from encoded object bodies."""
         pdf_data = b"%PDF-1.4\n"
         offsets = []
@@ -720,13 +783,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         )
         return pdf_data
 
-    def pdf_number(self, value):
+    def _pdf_number(self, value: float) -> str:
         """Return a compact PDF numeric literal."""
         return ("%.2f" % value).rstrip("0").rstrip(".")
 
-    def draw_canvas_grid(self, size):
+    def _draw_canvas_grid(self, size):
         """Draw a faint simulator-style workspace grid."""
-        self.set_colour(*self.theme_colour("grid"))
+        self._set_colour(*self._theme_colour("grid"))
         GL.glBegin(GL.GL_LINES)
         for x_pos in range(0, size.width + 1, 24):
             GL.glVertex2f(x_pos, 0)
@@ -736,16 +799,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(size.width, y_pos)
         GL.glEnd()
 
-    def draw_circuit_overview(self, bounds):
+    def _draw_circuit_overview(self, bounds):
         """Draw a compact block diagram of the parsed circuit."""
         x_pos, y_pos, width, height = bounds
-        self.draw_rectangle(
+        self._draw_rectangle(
             bounds,
-            self.theme_colour("circuit_bg"),
-            self.theme_colour("circuit_border"),
+            self._theme_colour("circuit_bg"),
+            self._theme_colour("circuit_border"),
         )
         self.render_text(
-            self.text("circuit_overview"), x_pos + 10, y_pos + height - 20
+            self._text("circuit_overview"), x_pos + 10, y_pos + height - 20
         )
 
         view_bounds = (x_pos + 10, y_pos + 26, width - 32, height - 64)
@@ -755,11 +818,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         if self.circuit_display_3d:
             self.circuit_geometry = {"view": view_bounds, "mode": "3d"}
-            self.draw_3d_circuit(view_bounds)
-            self.draw_circuit_scrollbars(view_bounds)
+            self._draw_3d_circuit(view_bounds)
+            self._draw_circuit_scrollbars(view_bounds)
             return
 
-        base_content_width, base_content_height = self.circuit_content_size(
+        base_content_width, base_content_height = self._circuit_content_size(
             view_width, view_height
         )
         self.last_circuit_view = (view_width, view_height)
@@ -769,10 +832,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         content_height = base_content_height * circuit_zoom
         max_scroll_x = max(content_width - view_width, 0)
         max_scroll_y = max(content_height - view_height, 0)
-        self.circuit_scroll_x = self.clamp(
+        self.circuit_scroll_x = self._clamp(
             self.circuit_scroll_x, 0, max_scroll_x
         )
-        self.circuit_scroll_y = self.clamp(
+        self.circuit_scroll_y = self._clamp(
             self.circuit_scroll_y, 0, max_scroll_y
         )
         content_origin_x = view_x - self.circuit_scroll_x
@@ -787,23 +850,23 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "max_scroll_y": max_scroll_y,
         }
 
-        self.begin_scissor(view_bounds)
+        self._begin_scissor(view_bounds)
         GL.glPushMatrix()
         GL.glTranslated(content_origin_x, content_origin_y, 0.0)
         GL.glScaled(circuit_zoom, circuit_zoom, 1.0)
-        positions = self.build_device_positions(
+        positions = self._build_device_positions(
             (0, 0, base_content_width, base_content_height)
         )
-        self.draw_connections(positions)
+        self._draw_connections(positions)
 
         for device in self.devices.devices_list:
             if device.device_id in positions:
-                self.draw_device_node(device, positions[device.device_id])
+                self._draw_device_node(device, positions[device.device_id])
         GL.glPopMatrix()
-        self.end_scissor()
-        self.draw_circuit_scrollbars(view_bounds)
+        self._end_scissor()
+        self._draw_circuit_scrollbars(view_bounds)
 
-    def draw_3d_circuit(self, view_bounds):
+    def _draw_3d_circuit(self, view_bounds):
         """Render the circuit as 3D blocks whose height shows live state.
 
         Each device becomes a coloured tower (colour = device type, height =
@@ -812,36 +875,36 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         which makes the data-flow depth and the live signal levels easy to
         read at a glance.
         """
-        self.draw_rectangle(
+        self._draw_rectangle(
             view_bounds,
-            self.theme_colour("circuit_bg"),
-            self.theme_colour("circuit_border"),
+            self._theme_colour("circuit_bg"),
+            self._theme_colour("circuit_border"),
         )
-        viewport = self.canvas_pixel_rect(view_bounds)
+        viewport = self._canvas_pixel_rect(view_bounds)
         if viewport is None:
             return
-        content_width, content_height = self.circuit_content_size(
+        content_width, content_height = self._circuit_content_size(
             view_bounds[2], view_bounds[3]
         )
-        positions = self.build_device_positions(
+        positions = self._build_device_positions(
             (0, 0, content_width, content_height)
         )
         if not positions:
             return
 
-        layout = self.circuit_3d_layout(positions)
+        layout = self._circuit_3d_layout(positions)
         grid = getattr(self, "circuit_grid", None)
-        wire_paths = self.circuit_wire_paths(positions, grid) if grid else []
+        wire_paths = self._circuit_wire_paths(positions, grid) if grid else []
         size = self.GetClientSize()
         x_pos, y_pos, width, height = viewport
-        wire_top = self.circuit_3d_wire_top(len(wire_paths))
-        camera_distance, far_plane = self.fit_3d_camera_distance(
+        wire_top = self._circuit_3d_wire_top(len(wire_paths))
+        camera_distance, far_plane = self._fit_3d_camera_distance(
             width, height, layout["span_x"], layout["span_z"], 40.0,
             self.circuit_3d_rotate_x, self.circuit_3d_rotate_y,
             self.circuit_3d_zoom, half_height=max(32.0, wire_top + 8.0),
             fov_y=40.0
         )
-        self.store_circuit_3d_geometry(
+        self._store_circuit_3d_geometry(
             (x_pos, y_pos, width, height), camera_distance, layout
         )
         try:
@@ -862,20 +925,20 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
             GL.glRotatef(self.circuit_3d_rotate_x, 1.0, 0.0, 0.0)
             GL.glRotatef(self.circuit_3d_rotate_y, 0.0, 1.0, 0.0)
-            self.configure_3d_lighting()
-            self.draw_3d_circuit_floor(layout)
-            self.draw_3d_circuit_wires(layout, wire_paths)
-            self.draw_3d_circuit_blocks(layout)
-            self.draw_3d_circuit_pins(layout, positions)
+            self._configure_3d_lighting()
+            self._draw_3d_circuit_floor(layout)
+            self._draw_3d_circuit_wires(layout, wire_paths)
+            self._draw_3d_circuit_blocks(layout)
+            self._draw_3d_circuit_pins(layout, positions)
         finally:
             GL.glLineWidth(1.0)
-            self.configure_2d_projection(size)
-        self.draw_3d_axis_gizmo(
+            self._configure_2d_projection(size)
+        self._draw_3d_axis_gizmo(
             view_bounds[0] + 40, view_bounds[1] + 42, 24,
             self.circuit_3d_rotate_x, self.circuit_3d_rotate_y
         )
 
-    def store_circuit_3d_geometry(self, viewport, camera_distance, layout):
+    def _store_circuit_3d_geometry(self, viewport, camera_distance, layout):
         """Record 3D camera framing for zoom-to-cursor and the scrollbars."""
         view_x, view_y, view_width, view_height = viewport
         fov_y = 40.0
@@ -898,7 +961,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "max_pan_y": pan_extent_y / 2.0,
         })
 
-    def circuit_3d_layout(self, positions):
+    def _circuit_3d_layout(self, positions):
         """Return centred 3D coordinates for the blocks and their wires."""
         centres = {}
         for device_id, (px, py, pw, ph) in positions.items():
@@ -925,9 +988,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "span_z": max((max(zs) - min(zs)) * scale, 1.0),
         }
 
-    def circuit_block_height_3d(self, device):
+    def _circuit_block_height_3d(self, device):
         """Return a 3D tower height that reflects the device output level."""
-        output_ids = self.sorted_port_ids(device.outputs)
+        output_ids = self._sorted_port_ids(device.outputs)
         if output_ids:
             signal = device.outputs.get(output_ids[0])
             if signal in (self.devices.HIGH, self.devices.RISING):
@@ -936,12 +999,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 return 18.0
         return 34.0
 
-    def draw_3d_circuit_floor(self, layout):
+    def _draw_3d_circuit_floor(self, layout):
         """Draw the floor plane and grid beneath the 3D circuit blocks."""
         half_x = layout["span_x"] / 2 + 50
         half_z = layout["span_z"] / 2 + 50
         GL.glDisable(GL.GL_LIGHTING)
-        self.set_colour(*self.theme_colour("grid_minor"))
+        self._set_colour(*self._theme_colour("grid_minor"))
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex3f(-half_x, -0.4, half_z)
         GL.glVertex3f(half_x, -0.4, half_z)
@@ -949,7 +1012,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glVertex3f(-half_x, -0.4, -half_z)
         GL.glEnd()
 
-        self.set_colour(*self.theme_colour("grid_row"))
+        self._set_colour(*self._theme_colour("grid_row"))
         GL.glLineWidth(1.0)
         GL.glBegin(GL.GL_LINES)
         line_x = -half_x
@@ -964,7 +1027,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             line_z += 60.0
         GL.glEnd()
 
-    def draw_3d_circuit_wires(self, layout, paths):
+    def _draw_3d_circuit_wires(self, layout, paths):
         """Draw the orthogonal 2D routes as raised conduits on the 3D floor.
 
         Reusing the 2D router gives the 3D wires the same per-wire lanes and
@@ -980,19 +1043,20 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         pin_y = 4.5
         count = len(paths)
         for index, (points, signal) in enumerate(paths):
-            self.set_colour(*self.signal_colour(signal))
+            self._set_colour(*self._signal_colour(signal))
             floor = [
                 ((point_x - mid_x) * scale, -(point_y - mid_z) * scale)
                 for point_x, point_y in points
             ]
-            height = self.circuit_3d_wire_height(index, count)
+            height = self._circuit_3d_wire_height(index, count)
             route = [(floor[0][0], pin_y, floor[0][1])]
             route += [(fx, height, fz) for fx, fz in floor]
             route.append((floor[-1][0], pin_y, floor[-1][1]))
             for start, end in zip(route, route[1:]):
-                self.draw_3d_wire_segment(start, end)
+                self._draw_3d_wire_segment(start, end)
 
-    def circuit_3d_wire_height(self, index, count):
+    def _circuit_3d_wire_height(self, index: int,
+                                count: int) -> float:
         """Return the lifted height for one of ``count`` 3D wires.
 
         Spreading the wires evenly across a bounded height band keeps a clear
@@ -1002,25 +1066,25 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """
         if count <= 1:
             return self.circuit_3d_wire_base
-        step = self.clamp(self.circuit_3d_wire_band / (count - 1), 4.5, 14.0)
+        step = self._clamp(self.circuit_3d_wire_band / (count - 1), 4.5, 14.0)
         return self.circuit_3d_wire_base + index * step
 
-    def circuit_3d_wire_top(self, count):
+    def _circuit_3d_wire_top(self, count: int) -> float:
         """Return the height of the highest 3D wire, for camera framing."""
         if count <= 0:
             return self.circuit_3d_wire_base
-        return self.circuit_3d_wire_height(count - 1, count)
+        return self._circuit_3d_wire_height(count - 1, count)
 
-    def draw_3d_wire_segment(self, start, end):
+    def _draw_3d_wire_segment(self, start, end):
         """Draw one axis-aligned wire segment as a thin solid bar in 3D."""
         half = 1.3
         x_lo, x_hi = sorted((start[0], end[0]))
         y_lo, y_hi = sorted((start[1], end[1]))
         z_lo, z_hi = sorted((start[2], end[2]))
-        self.draw_3d_box(x_lo - half, x_hi + half, y_lo - half, y_hi + half,
-                         z_lo - half, z_hi + half)
+        self._draw_3d_box(x_lo - half, x_hi + half, y_lo - half, y_hi + half,
+                          z_lo - half, z_hi + half)
 
-    def draw_3d_box(self, x_lo, x_hi, y_lo, y_hi, z_lo, z_hi):
+    def _draw_3d_box(self, x_lo, x_hi, y_lo, y_hi, z_lo, z_hi):
         """Draw a lit axis-aligned box spanning the given extents."""
         GL.glEnable(GL.GL_LIGHTING)
         GL.glBegin(GL.GL_QUADS)
@@ -1056,7 +1120,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glVertex3f(x_lo, y_lo, z_hi)
         GL.glEnd()
 
-    def draw_3d_circuit_pins(self, layout, positions):
+    def _draw_3d_circuit_pins(self, layout, positions):
         """Draw spheres at every input and output pin, as in the 2D view."""
         mid_x = layout["mid_x"]
         mid_z = layout["mid_z"]
@@ -1068,27 +1132,27 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             position = positions.get(device.device_id)
             if position is None:
                 continue
-            for input_id in self.sorted_port_ids(device.inputs):
-                pin_x, pin_z = self.input_pin(position, device, input_id)
-                self.set_colour(0.97, 0.97, 0.99)
-                self.draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
-                                    -(pin_z - mid_z) * scale, 3.0)
-            for output_id in self.sorted_port_ids(device.outputs):
-                pin_x, pin_z = self.output_pin(position, device, output_id)
+            for input_id in self._sorted_port_ids(device.inputs):
+                pin_x, pin_z = self._input_pin(position, device, input_id)
+                self._set_colour(0.97, 0.97, 0.99)
+                self._draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
+                                     -(pin_z - mid_z) * scale, 3.0)
+            for output_id in self._sorted_port_ids(device.outputs):
+                pin_x, pin_z = self._output_pin(position, device, output_id)
                 signal = device.outputs.get(output_id)
-                self.set_colour(*self.signal_colour(signal))
-                self.draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
-                                    -(pin_z - mid_z) * scale, 4.2)
+                self._set_colour(*self._signal_colour(signal))
+                self._draw_3d_sphere(quadric, (pin_x - mid_x) * scale, pin_y,
+                                     -(pin_z - mid_z) * scale, 4.2)
         GLU.gluDeleteQuadric(quadric)
 
-    def draw_3d_sphere(self, quadric, x_pos, y_pos, z_pos, radius):
+    def _draw_3d_sphere(self, quadric, x_pos, y_pos, z_pos, radius):
         """Draw a lit sphere of the current colour at a 3D point."""
         GL.glPushMatrix()
         GL.glTranslatef(x_pos, y_pos, z_pos)
         GLU.gluSphere(quadric, radius, 12, 8)
         GL.glPopMatrix()
 
-    def draw_3d_circuit_blocks(self, layout):
+    def _draw_3d_circuit_blocks(self, layout):
         """Draw each device as a coloured 3D block sized by its signal."""
         half_depth = 16.0
         for device in self.devices.devices_list:
@@ -1096,15 +1160,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             if block is None:
                 continue
             block_x, block_z, half_width = block
-            height = self.circuit_block_height_3d(device)
-            self.set_colour(*self.device_fill_colour(device))
-            self.draw_3d_cuboid(block_x, block_z, half_width, half_depth,
-                                height)
-            self.draw_3d_circuit_label(device, block_x, block_z, half_width,
-                                       half_depth, height)
+            height = self._circuit_block_height_3d(device)
+            self._set_colour(*self._device_fill_colour(device))
+            self._draw_3d_cuboid(block_x, block_z, half_width, half_depth,
+                                 height)
+            self._draw_3d_circuit_label(device, block_x, block_z, half_width,
+                                        half_depth, height)
 
-    def draw_3d_circuit_label(self, device, block_x, block_z, half_width,
-                              half_depth, height):
+    def _draw_3d_circuit_label(self, device, block_x, block_z, half_width,
+                               half_depth, height):
         """Draw a device name laid flat on top of its 3D block."""
         name = str(self.devices.names.get_name_string(device.device_id))
         font = GLUT.GLUT_STROKE_ROMAN
@@ -1113,7 +1177,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         ) or 1.0
         scale = min((half_width * 2 - 6) / width_units, 0.13)
         GL.glDisable(GL.GL_LIGHTING)
-        self.set_colour(*self.theme_colour("text"))
+        self._set_colour(*self._theme_colour("text"))
         GL.glPushMatrix()
         GL.glTranslatef(block_x - half_width + 4, height + 0.5,
                         block_z + half_depth - 4)
@@ -1124,14 +1188,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GLUT.glutStrokeCharacter(font, ord(character))
         GL.glPopMatrix()
 
-    def circuit_metrics(self):
+    def _circuit_metrics(self):
         """Return shared sizing for circuit layout and routing.
 
         Devices share a single set of rows across every column so the gaps
         between rows form clear horizontal routing corridors, and uniform
         column pitches leave clear vertical channels between columns.
         """
-        layers = self.calculate_device_layers()
+        layers = self._calculate_device_layers()
         groups = {}
         for device in self.devices.devices_list:
             groups.setdefault(layers.get(device.device_id, 1), []).append(
@@ -1158,15 +1222,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "band_height": max(50, max_pins * self.circuit_pin_spacing + 20),
         }
 
-    def device_block_height(self, device):
+    def _device_block_height(self, device):
         """Return the drawn height of a device, sized for its pin count."""
         pins = max(len(device.inputs), len(device.outputs), 1)
         return max(46, pins * self.circuit_pin_spacing + 16)
 
-    def build_device_positions(self, bounds):
+    def _build_device_positions(self, bounds):
         """Return a grid layout with devices aligned to shared rows."""
         x_pos, y_pos, width, height = bounds
-        metrics = self.circuit_metrics()
+        metrics = self._circuit_metrics()
         block_width = metrics["block_width"]
         band_height = metrics["band_height"]
         max_layer = metrics["max_layer"]
@@ -1197,7 +1261,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             for index, device in enumerate(group):
                 row = start_row + index
                 band_bottom = top - row * row_pitch
-                device_height = self.device_block_height(device)
+                device_height = self._device_block_height(device)
                 node_y = band_bottom + (band_height - device_height) / 2
                 positions[device.device_id] = (
                     col_left, node_y, block_width, device_height
@@ -1213,9 +1277,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         }
         return positions
 
-    def circuit_content_size(self, view_width, view_height):
+    def _circuit_content_size(self, view_width, view_height):
         """Return virtual circuit dimensions that keep routing room."""
-        metrics = self.circuit_metrics()
+        metrics = self._circuit_metrics()
         max_layer = metrics["max_layer"]
         total_rows = metrics["total_rows"]
         min_col_gap = 90
@@ -1236,10 +1300,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             max(view_height, natural_height),
         )
 
-    def draw_circuit_scrollbars(self, view_bounds):
+    def _draw_circuit_scrollbars(self, view_bounds):
         """Draw scrollbars for oversized circuit diagrams."""
         if self.circuit_geometry.get("mode") == "3d":
-            self.draw_circuit_scrollbars_3d(view_bounds)
+            self._draw_circuit_scrollbars_3d(view_bounds)
             return
         view_x, view_y, view_width, view_height = view_bounds
         content_width = self.circuit_geometry.get("content_width", view_width)
@@ -1256,15 +1320,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             fraction = self.circuit_scroll_y / max_scroll_y
             thumb_y = view_y + (1 - fraction) * usable
             thumb = (track[0] + 1, thumb_y, 8, thumb_height)
-            self.draw_rectangle(
+            self._draw_rectangle(
                 track,
-                self.theme_colour("scrollbar_track"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_track"),
+                self._theme_colour("scrollbar_border"),
             )
-            self.draw_rectangle(
+            self._draw_rectangle(
                 thumb,
-                self.theme_colour("scrollbar_thumb"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_thumb"),
+                self._theme_colour("scrollbar_border"),
             )
             self.circuit_geometry["vertical_track"] = track
             self.circuit_geometry["vertical_thumb"] = thumb
@@ -1279,15 +1343,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             fraction = self.circuit_scroll_x / max_scroll_x
             thumb_x = view_x + fraction * usable
             thumb = (thumb_x, track[1] + 1, thumb_width, 9)
-            self.draw_rectangle(
+            self._draw_rectangle(
                 track,
-                self.theme_colour("scrollbar_track"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_track"),
+                self._theme_colour("scrollbar_border"),
             )
-            self.draw_rectangle(
+            self._draw_rectangle(
                 thumb,
-                self.theme_colour("scrollbar_thumb"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_thumb"),
+                self._theme_colour("scrollbar_border"),
             )
             self.circuit_geometry["horizontal_track"] = track
             self.circuit_geometry["horizontal_thumb"] = thumb
@@ -1295,7 +1359,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_geometry["horizontal_track"] = None
             self.circuit_geometry["horizontal_thumb"] = None
 
-    def draw_circuit_scrollbars_3d(self, view_bounds):
+    def _draw_circuit_scrollbars_3d(self, view_bounds):
         """Draw scrollbars that pan the rotatable 3D circuit camera.
 
         The 3D view has no fixed content rectangle, so the bars instead move
@@ -1312,24 +1376,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             content_y = max(geometry.get("content_y", view_height), 1)
             visible_y = geometry.get("visible_y", view_height)
             track = (view_x + view_width + 6, view_y, 10, view_height)
-            thumb_height = self.clamp(
+            thumb_height = self._clamp(
                 view_height * visible_y / content_y, 28, view_height
             )
             usable = max(view_height - thumb_height, 1)
-            fraction = self.clamp(
+            fraction = self._clamp(
                 (self.circuit_3d_pan_y + max_pan_y) / (2 * max_pan_y), 0, 1
             )
             thumb_y = view_y + (1 - fraction) * usable
             thumb = (track[0] + 1, thumb_y, 8, thumb_height)
-            self.draw_rectangle(
+            self._draw_rectangle(
                 track,
-                self.theme_colour("scrollbar_track"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_track"),
+                self._theme_colour("scrollbar_border"),
             )
-            self.draw_rectangle(
+            self._draw_rectangle(
                 thumb,
-                self.theme_colour("scrollbar_thumb"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_thumb"),
+                self._theme_colour("scrollbar_border"),
             )
             geometry["vertical_track"] = track
             geometry["vertical_thumb"] = thumb
@@ -1341,24 +1405,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             content_x = max(geometry.get("content_x", view_width), 1)
             visible_x = geometry.get("visible_x", view_width)
             track = (view_x, view_y - 16, view_width, 11)
-            thumb_width = self.clamp(
+            thumb_width = self._clamp(
                 view_width * visible_x / content_x, 44, view_width
             )
             usable = max(view_width - thumb_width, 1)
-            fraction = self.clamp(
+            fraction = self._clamp(
                 (max_pan_x - self.circuit_3d_pan_x) / (2 * max_pan_x), 0, 1
             )
             thumb_x = view_x + fraction * usable
             thumb = (thumb_x, track[1] + 1, thumb_width, 9)
-            self.draw_rectangle(
+            self._draw_rectangle(
                 track,
-                self.theme_colour("scrollbar_track"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_track"),
+                self._theme_colour("scrollbar_border"),
             )
-            self.draw_rectangle(
+            self._draw_rectangle(
                 thumb,
-                self.theme_colour("scrollbar_thumb"),
-                self.theme_colour("scrollbar_border"),
+                self._theme_colour("scrollbar_thumb"),
+                self._theme_colour("scrollbar_border"),
             )
             geometry["horizontal_track"] = track
             geometry["horizontal_thumb"] = thumb
@@ -1366,14 +1430,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             geometry["horizontal_track"] = None
             geometry["horizontal_thumb"] = None
 
-    def set_circuit_3d_scroll(self, axis, fraction):
+    def _set_circuit_3d_scroll(self, axis, fraction):
         """Pan the 3D circuit camera from a scrollbar fraction in [0, 1].
 
         ``fraction`` 0 frames the top/left of the scene and 1 the
         bottom/right, matching the 2D scrollbar convention and the
         drag-to-pan direction.
         """
-        fraction = self.clamp(fraction, 0.0, 1.0)
+        fraction = self._clamp(fraction, 0.0, 1.0)
         if axis == "vertical":
             max_pan = self.circuit_geometry.get("max_pan_y", 0.0)
             self.circuit_3d_pan_y = (fraction * 2.0 - 1.0) * max_pan
@@ -1381,9 +1445,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             max_pan = self.circuit_geometry.get("max_pan_x", 0.0)
             self.circuit_3d_pan_x = (1.0 - fraction * 2.0) * max_pan
 
-    def estimate_circuit_height(self):
+    def _estimate_circuit_height(self):
         """Return enough circuit height to avoid stacked device overlap."""
-        layers = self.calculate_device_layers()
+        layers = self._calculate_device_layers()
         layer_counts = {}
         for device in self.devices.devices_list:
             layer = layers.get(device.device_id, 1)
@@ -1399,7 +1463,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             + max(0, max_devices_in_layer - 1) * row_gap
         )
 
-    def calculate_device_layers(self):
+    def _calculate_device_layers(self):
         """Group devices by dependency depth for circuit drawing."""
         layers = {}
         for device in self.devices.devices_list:
@@ -1438,7 +1502,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         return layers
 
-    def draw_connections(self, positions):
+    def _draw_connections(self, positions):
         """Route wires through clear channels and corridors between devices.
 
         Wires only travel vertically inside the gaps between columns and
@@ -1450,30 +1514,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         grid = getattr(self, "circuit_grid", None)
         if not grid:
             return
-        for points, signal in self.circuit_wire_paths(positions, grid):
-            self.draw_wire_path(points, signal)
+        for points, signal in self._circuit_wire_paths(positions, grid):
+            self._draw_wire_path(points, signal)
 
-    def circuit_wire_paths(self, positions, grid):
+    def _circuit_wire_paths(self, positions, grid):
         """Return ``(points, signal)`` for every routed wire.
 
         The same clean orthogonal routes drive both the 2D diagram and the
         3D circuit floor, so the 3D wires inherit the channel/corridor lanes
         and connect to the same distinct input pins.
         """
-        wires = self.collect_circuit_wires(positions, grid)
-        self.assign_wire_lanes(wires)
+        wires = self._collect_circuit_wires(positions, grid)
+        self._assign_wire_lanes(wires)
         return [
-            (self.route_circuit_wire(wire, grid), wire["signal"])
+            (self._route_circuit_wire(wire, grid), wire["signal"])
             for wire in wires
         ]
 
-    def collect_circuit_wires(self, positions, grid):
+    def _collect_circuit_wires(self, positions, grid):
         """Return a routed-wire description for every connected input."""
         wires = []
         for target in self.devices.devices_list:
             if target.device_id not in positions:
                 continue
-            for input_id in self.sorted_port_ids(target.inputs):
+            for input_id in self._sorted_port_ids(target.inputs):
                 connected = target.inputs[input_id]
                 if connected is None:
                     continue
@@ -1482,10 +1546,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                     continue
                 source = self.devices.get_device(source_id)
                 wires.append({
-                    "start": self.output_pin(
+                    "start": self._output_pin(
                         positions[source_id], source, output_id
                     ),
-                    "end": self.input_pin(
+                    "end": self._input_pin(
                         positions[target.device_id], target, input_id
                     ),
                     "source_layer": grid["layers"].get(source_id, 0),
@@ -1496,7 +1560,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 })
         return wires
 
-    def assign_wire_lanes(self, wires):
+    def _assign_wire_lanes(self, wires):
         """Give every wire unique channel lanes and corridor tracks."""
         channels = {}
         corridors = {}
@@ -1536,7 +1600,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         for track, wire in enumerate(highway):
             wire["highway_track"] = (track, len(highway))
 
-    def circuit_channel_x(self, grid, channel, wire):
+    def _circuit_channel_x(self, grid, channel, wire):
         """Return the x of a wire's vertical lane within a channel."""
         lane, count = wire["channel_index"][channel]
         channel_left = (
@@ -1545,7 +1609,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         channel_width = grid["col_pitch"] - grid["block_width"]
         return channel_left + (lane + 1) * channel_width / (count + 1)
 
-    def circuit_corridor_y(self, grid, wire):
+    def _circuit_corridor_y(self, grid, wire):
         """Return the y of a wire's horizontal track within a corridor."""
         side, row = wire["corridor_key"]
         track, count = wire["corridor_track"]
@@ -1556,30 +1620,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return band_bottom - offset
         return band_bottom + grid["band_height"] + offset
 
-    def route_circuit_wire(self, wire, grid):
+    def _route_circuit_wire(self, wire, grid):
         """Return the orthogonal point list for one routed wire."""
         x_start, y_start = wire["start"]
         x_end, y_end = wire["end"]
         if wire["route"] == "adjacent":
-            lane_x = self.circuit_channel_x(grid, wire["main_channel"], wire)
+            lane_x = self._circuit_channel_x(grid, wire["main_channel"], wire)
             return [(x_start, y_start), (lane_x, y_start),
                     (lane_x, y_end), (x_end, y_end)]
 
-        out_x = self.circuit_channel_x(grid, wire["out_channel"], wire)
-        in_x = self.circuit_channel_x(grid, wire["in_channel"], wire)
+        out_x = self._circuit_channel_x(grid, wire["out_channel"], wire)
+        in_x = self._circuit_channel_x(grid, wire["in_channel"], wire)
         if wire["route"] == "span":
-            corridor_y = self.circuit_corridor_y(grid, wire)
+            corridor_y = self._circuit_corridor_y(grid, wire)
         else:
             track, _ = wire["highway_track"]
             corridor_y = grid["top"] + grid["band_height"] + 10 + track * 8
         return [(x_start, y_start), (out_x, y_start), (out_x, corridor_y),
                 (in_x, corridor_y), (in_x, y_end), (x_end, y_end)]
 
-    def draw_wire_path(self, points, signal):
+    def _draw_wire_path(self, points, signal):
         """Draw an orthogonal wire through the given points."""
         if len(points) < 2:
             return
-        self.set_signal_colour(signal)
+        self._set_signal_colour(signal)
         GL.glLineWidth(1.6)
         GL.glBegin(GL.GL_LINE_STRIP)
         for x_pos, y_pos in points:
@@ -1587,58 +1651,58 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
         GL.glLineWidth(1.0)
 
-    def draw_device_node(self, device, bounds):
+    def _draw_device_node(self, device, bounds):
         """Draw one device as a labelled circuit block."""
         x_pos, y_pos, width, height = bounds
         kind = self.devices.names.get_name_string(device.device_kind)
         name = self.devices.names.get_name_string(device.device_id)
-        fill_colour = self.device_fill_colour(device)
+        fill_colour = self._device_fill_colour(device)
 
-        self.draw_rectangle(
-            bounds, fill_colour, self.theme_colour("device_border")
+        self._draw_rectangle(
+            bounds, fill_colour, self._theme_colour("device_border")
         )
-        self.render_scaled_text(
+        self._render_scaled_text(
             name, x_pos + 8, y_pos + height - 16, 13, width - 16
         )
-        self.render_scaled_text(
+        self._render_scaled_text(
             kind, x_pos + 8, y_pos + height - 33, 9, width - 16,
-            self.theme_colour("subtle_text")
+            self._theme_colour("subtle_text")
         )
 
-        for input_id in self.sorted_port_ids(device.inputs):
-            pin_x, pin_y = self.input_pin(bounds, device, input_id)
-            self.draw_circle(pin_x, pin_y, 4.0, (0.98, 0.98, 0.98))
+        for input_id in self._sorted_port_ids(device.inputs):
+            pin_x, pin_y = self._input_pin(bounds, device, input_id)
+            self._draw_circle(pin_x, pin_y, 4.0, (0.98, 0.98, 0.98))
 
-        for output_id in self.sorted_port_ids(device.outputs):
-            pin_x, pin_y = self.output_pin(bounds, device, output_id)
+        for output_id in self._sorted_port_ids(device.outputs):
+            pin_x, pin_y = self._output_pin(bounds, device, output_id)
             signal = device.outputs.get(output_id)
-            self.draw_circle(pin_x, pin_y, 5.5, self.signal_colour(signal))
+            self._draw_circle(pin_x, pin_y, 5.5, self._signal_colour(signal))
 
-    def device_fill_colour(self, device):
+    def _device_fill_colour(self, device):
         """Return a fill colour for a device type."""
         if device.device_kind == self.devices.SWITCH:
-            return self.theme_colour("switch_fill")
+            return self._theme_colour("switch_fill")
         if device.device_kind == self.devices.CLOCK:
-            return self.theme_colour("clock_fill")
+            return self._theme_colour("clock_fill")
         if device.device_kind == self.devices.D_TYPE:
-            return self.theme_colour("dtype_fill")
-        return self.theme_colour("gate_fill")
+            return self._theme_colour("dtype_fill")
+        return self._theme_colour("gate_fill")
 
-    def input_pin(self, bounds, device, input_id):
+    def _input_pin(self, bounds, device, input_id):
         """Return the position of an input pin."""
         x_pos, y_pos, _, height = bounds
-        input_ids = self.sorted_port_ids(device.inputs)
+        input_ids = self._sorted_port_ids(device.inputs)
         if input_id not in input_ids:
             return x_pos, y_pos + height / 2
 
         index = input_ids.index(input_id)
         count = len(input_ids)
-        return x_pos, self.distributed_pin_y(y_pos, height, index, count)
+        return x_pos, self._distributed_pin_y(y_pos, height, index, count)
 
-    def output_pin(self, bounds, device, output_id):
+    def _output_pin(self, bounds, device, output_id):
         """Return the position of an output pin."""
         x_pos, y_pos, width, height = bounds
-        output_ids = self.sorted_port_ids(device.outputs)
+        output_ids = self._sorted_port_ids(device.outputs)
         if output_id not in output_ids:
             return x_pos + width, y_pos + height / 2
 
@@ -1646,17 +1710,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         count = len(output_ids)
         return (
             x_pos + width,
-            self.distributed_pin_y(y_pos, height, index, count),
+            self._distributed_pin_y(y_pos, height, index, count),
         )
 
-    def distributed_pin_y(self, y_pos, height, index, count):
+    def _distributed_pin_y(self, y_pos, height, index, count):
         """Return a vertically distributed pin y coordinate."""
         if count <= 1:
             return y_pos + height / 2
         usable_height = height - 12
         return y_pos + height - 6 - index * usable_height / (count - 1)
 
-    def draw_oscilloscope(self, bounds, monitor_items):
+    def _draw_oscilloscope(self, bounds, monitor_items):
         """Draw monitor signals in a floating oscilloscope window."""
         self.scope_geometry.pop("rows_3d", None)
         x_pos, y_pos, width, height = bounds
@@ -1671,22 +1735,22 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_scope_bounds = scope_bounds
         scope_x, scope_y, scope_width, scope_height = scope_bounds
 
-        self.draw_rectangle(
+        self._draw_rectangle(
             scope_bounds,
-            self.theme_colour("scope_bg"),
-            self.theme_colour("scope_border"),
+            self._theme_colour("scope_bg"),
+            self._theme_colour("scope_border"),
         )
-        self.draw_scope_header(scope_bounds)
+        self._draw_scope_header(scope_bounds)
 
         if not monitor_items:
             self.render_text(
-                self.text("no_monitors"),
+                self._text("no_monitors"),
                 scope_x + 20,
                 scope_y + scope_height - 78,
             )
             return
 
-        label_width = self.calculate_scope_label_width(monitor_items)
+        label_width = self._calculate_scope_label_width(monitor_items)
         title_height = 28
         control_height = 8
         axis_height = 84
@@ -1703,7 +1767,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         scope_cycle_zoom = getattr(self, "scope_cycle_zoom", 1.0)
         zoomed_cycle_width = self.default_cycle_width * scope_cycle_zoom
         max_visible_cycles = max(10, int(plot_width // zoomed_cycle_width))
-        max_cycles = self.max_recorded_cycles(monitor_items)
+        max_cycles = self._max_recorded_cycles(monitor_items)
         if max_cycles == 0:
             cycle_count = min(10, max_visible_cycles)
             first_cycle = 0
@@ -1711,9 +1775,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.cycle_width = plot_width / max(cycle_count, 1)
 
             total_rows = len(monitor_items)
-            visible_rows = self.scope_visible_rows(plot_height, total_rows)
+            visible_rows = self._scope_visible_rows(plot_height, total_rows)
             max_first_row = max(total_rows - visible_rows, 0)
-            self.scope_first_row = self.clamp(
+            self.scope_first_row = self._clamp(
                 self.scope_first_row, 0, max_first_row
             )
             visible_monitor_items = monitor_items[
@@ -1721,24 +1785,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             ]
 
             self.render_text(
-                self.text("press_run"),
+                self._text("press_run"),
                 scope_x + 20,
                 scope_y + scope_height - 50,
-                self.theme_colour("subtle_text"),
+                self._theme_colour("subtle_text"),
             )
-            self.draw_scope_grid(
+            self._draw_scope_grid(
                 plot_x, plot_y, plot_width, plot_height, cycle_count
             )
-            self.draw_scope_scrollbars(
+            self._draw_scope_scrollbars(
                 scope_bounds, plot_x, plot_y, plot_width, plot_height,
                 first_cycle, cycle_count, cycle_count, self.scope_first_row,
                 total_rows, visible_rows
             )
-            self.draw_empty_scope_rows(
+            self._draw_empty_scope_rows(
                 scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
                 cycle_count, self.scope_first_row
             )
-            self.draw_scope_axis(
+            self._draw_scope_axis(
                 plot_x, plot_y, cycle_count, first_cycle, cycle_count
             )
             return
@@ -1748,39 +1812,39 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if self.follow_latest_cycles:
             self.scope_first_cycle = max_first_cycle
         else:
-            self.scope_first_cycle = self.clamp(
+            self.scope_first_cycle = self._clamp(
                 self.scope_first_cycle, 0, max_first_cycle
             )
         first_cycle = self.scope_first_cycle
         self.cycle_width = plot_width / max(cycle_count, 1)
 
         total_rows = len(monitor_items)
-        visible_rows = self.scope_visible_rows(plot_height, total_rows)
+        visible_rows = self._scope_visible_rows(plot_height, total_rows)
         max_first_row = max(total_rows - visible_rows, 0)
-        self.scope_first_row = self.clamp(
+        self.scope_first_row = self._clamp(
             self.scope_first_row, 0, max_first_row
         )
         visible_monitor_items = monitor_items[
             self.scope_first_row:self.scope_first_row + visible_rows
         ]
 
-        self.draw_scope_grid(
+        self._draw_scope_grid(
             plot_x, plot_y, plot_width, plot_height, cycle_count
         )
-        self.draw_scope_scrollbars(
+        self._draw_scope_scrollbars(
             scope_bounds, plot_x, plot_y, plot_width, plot_height,
             first_cycle, max_cycles, cycle_count, self.scope_first_row,
             total_rows, visible_rows
         )
-        self.draw_scope_rows(
+        self._draw_scope_rows(
             scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
             first_cycle, cycle_count, self.scope_first_row
         )
-        self.draw_scope_axis(
+        self._draw_scope_axis(
             plot_x, plot_y, cycle_count, first_cycle, max_cycles
         )
 
-    def draw_3d_oscilloscope(self, bounds, monitor_items):
+    def _draw_3d_oscilloscope(self, bounds, monitor_items):
         """Draw monitor signals as useful over-elaborate 3D traces."""
         x_pos, y_pos, width, height = bounds
 
@@ -1794,23 +1858,23 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_scope_bounds = scope_bounds
         scope_x, scope_y, scope_width, scope_height = scope_bounds
 
-        self.draw_rectangle(
+        self._draw_rectangle(
             scope_bounds,
-            self.theme_colour("scope_bg"),
-            self.theme_colour("scope_border"),
+            self._theme_colour("scope_bg"),
+            self._theme_colour("scope_border"),
         )
-        self.draw_scope_header(scope_bounds, self.text("oscilloscope_3d"))
+        self._draw_scope_header(scope_bounds, self._text("oscilloscope_3d"))
 
         if not monitor_items:
             self.scope_geometry = {}
             self.render_text(
-                self.text("no_monitors"),
+                self._text("no_monitors"),
                 scope_x + 20,
                 scope_y + scope_height - 78,
             )
             return
 
-        label_width = self.calculate_scope_label_width(monitor_items)
+        label_width = self._calculate_scope_label_width(monitor_items)
         title_height = 28
         control_height = 8
         axis_height = 84
@@ -1829,7 +1893,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         scope_cycle_zoom = getattr(self, "scope_cycle_zoom", 1.0)
         zoomed_cycle_width = self.default_cycle_width * scope_cycle_zoom
         max_visible_cycles = max(10, int(plot_width // zoomed_cycle_width))
-        max_cycles = self.max_recorded_cycles(monitor_items)
+        max_cycles = self._max_recorded_cycles(monitor_items)
 
         if max_cycles == 0:
             cycle_count = min(10, max_visible_cycles)
@@ -1837,9 +1901,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.scope_first_cycle = 0
             self.cycle_width = plot_width / max(cycle_count, 1)
             total_rows = len(monitor_items)
-            visible_rows = self.scope_visible_rows(plot_height, total_rows)
+            visible_rows = self._scope_visible_rows(plot_height, total_rows)
             max_first_row = max(total_rows - visible_rows, 0)
-            self.scope_first_row = self.clamp(
+            self.scope_first_row = self._clamp(
                 self.scope_first_row, 0, max_first_row
             )
             visible_monitor_items = monitor_items[
@@ -1847,26 +1911,26 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             ]
 
             self.render_text(
-                self.text("press_run"),
+                self._text("press_run"),
                 scope_x + 20,
                 scope_y + scope_height - 50,
-                self.theme_colour("subtle_text"),
+                self._theme_colour("subtle_text"),
             )
-            self.draw_3d_trace_view(
+            self._draw_3d_trace_view(
                 plot_x, plot_y, plot_width, plot_height,
                 visible_monitor_items, first_cycle, cycle_count,
                 self.scope_first_row, use_blank=True
             )
-            self.draw_3d_scope_labels(
+            self._draw_3d_scope_labels(
                 scope_x, plot_x, plot_y, plot_height,
                 visible_monitor_items, self.scope_first_row
             )
-            self.draw_scope_scrollbars(
+            self._draw_scope_scrollbars(
                 scope_bounds, plot_x, plot_y, plot_width, plot_height,
                 first_cycle, cycle_count, cycle_count, self.scope_first_row,
                 total_rows, visible_rows
             )
-            self.draw_scope_axis(
+            self._draw_scope_axis(
                 plot_x, plot_y, cycle_count, first_cycle, cycle_count
             )
             return
@@ -1876,64 +1940,64 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if self.follow_latest_cycles:
             self.scope_first_cycle = max_first_cycle
         else:
-            self.scope_first_cycle = self.clamp(
+            self.scope_first_cycle = self._clamp(
                 self.scope_first_cycle, 0, max_first_cycle
             )
         first_cycle = self.scope_first_cycle
         self.cycle_width = plot_width / max(cycle_count, 1)
 
         total_rows = len(monitor_items)
-        visible_rows = self.scope_visible_rows(plot_height, total_rows)
+        visible_rows = self._scope_visible_rows(plot_height, total_rows)
         max_first_row = max(total_rows - visible_rows, 0)
-        self.scope_first_row = self.clamp(
+        self.scope_first_row = self._clamp(
             self.scope_first_row, 0, max_first_row
         )
         visible_monitor_items = monitor_items[
             self.scope_first_row:self.scope_first_row + visible_rows
         ]
 
-        self.draw_3d_trace_view(
+        self._draw_3d_trace_view(
             plot_x, plot_y, plot_width, plot_height, visible_monitor_items,
             first_cycle, cycle_count, self.scope_first_row
         )
-        self.draw_3d_scope_labels(
+        self._draw_3d_scope_labels(
             scope_x, plot_x, plot_y, plot_height, visible_monitor_items,
             self.scope_first_row
         )
-        self.draw_scope_scrollbars(
+        self._draw_scope_scrollbars(
             scope_bounds, plot_x, plot_y, plot_width, plot_height,
             first_cycle, max_cycles, cycle_count, self.scope_first_row,
             total_rows, visible_rows
         )
-        self.draw_scope_axis(
+        self._draw_scope_axis(
             plot_x, plot_y, cycle_count, first_cycle, max_cycles
         )
 
-    def draw_3d_scope_labels(self, label_x, plot_x, plot_y, plot_height,
-                             monitor_items, first_row):
+    def _draw_3d_scope_labels(self, label_x, plot_x, plot_y, plot_height,
+                              monitor_items, first_row):
         """Draw readable row labels beside the 3D plot."""
-        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
+        row_gap = self._scope_row_gap(plot_height, len(monitor_items))
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), _ = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
             row_mid = plot_y + plot_height - 18 - index * row_gap
-            colour = self.trace_colour_for_monitor(
+            colour = self._trace_colour_for_monitor(
                 device_id, output_id,
-                self.signal_colour_index(device_id, output_id)
+                self._signal_colour_index(device_id, output_id)
             )
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             self.render_text(
                 "1", plot_x - 18, row_mid + 6,
-                self.theme_colour("subtle_text")
+                self._theme_colour("subtle_text")
             )
             self.render_text(
                 "0", plot_x - 18, row_mid - 11,
-                self.theme_colour("subtle_text")
+                self._theme_colour("subtle_text")
             )
 
-    def fit_3d_camera_distance(self, width, height, span_x, span_z, depth,
-                               rotate_x_deg, rotate_y_deg, zoom,
-                               half_height=9.0, fov_y=35.0):
+    def _fit_3d_camera_distance(self, width, height, span_x, span_z, depth,
+                                rotate_x_deg, rotate_y_deg, zoom,
+                                half_height=9.0, fov_y=35.0):
         """Return a camera distance and far plane that frame the whole scene.
 
         The rotated bounding box of the scene is projected onto the horizontal
@@ -1954,7 +2018,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         for sign_x in (-1.0, 1.0):
             for sign_y in (-1.0, 1.0):
                 for sign_z in (-1.0, 1.0):
-                    corner = self.rotate_scene_corner(
+                    corner = self._rotate_scene_corner(
                         sign_x * half_width, sign_y * half_height,
                         sign_z * half_depth, rotate_x, rotate_y
                     )
@@ -1968,7 +2032,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         far_plane = camera_distance + max_z + 200.0
         return camera_distance, far_plane
 
-    def rotate_scene_corner(self, x_pos, y_pos, z_pos, rotate_x, rotate_y):
+    def _rotate_scene_corner(
+        self, x_pos: float, y_pos: float, z_pos: float,
+        rotate_x: float, rotate_y: float
+    ) -> tuple[float, float, float]:
         """Rotate a scene corner the way the 3D trace camera will view it."""
         cos_y = math.cos(rotate_y)
         sin_y = math.sin(rotate_y)
@@ -1980,7 +2047,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         z_final = y_pos * sin_x + z_rot * cos_x
         return x_rot, y_rot, z_final
 
-    def axis_gizmo_axes(self, rotate_x_deg, rotate_y_deg):
+    def _axis_gizmo_axes(
+        self, rotate_x_deg: float, rotate_y_deg: float
+    ) -> list[tuple[str, float, float, float]]:
         """Return screen directions for the X/Y/Z axes at a camera angle.
 
         Each entry is ``(label, dx, dy, depth)`` where ``(dx, dy)`` is the
@@ -1996,28 +2065,28 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             ("Y", (0.0, 1.0, 0.0)),
             ("Z", (0.0, 0.0, 1.0)),
         ):
-            dx, dy, depth = self.rotate_scene_corner(
+            dx, dy, depth = self._rotate_scene_corner(
                 axis[0], axis[1], axis[2], rotate_x, rotate_y
             )
             axes.append((label, dx, dy, depth))
         axes.sort(key=lambda entry: entry[3])
         return axes
 
-    def draw_3d_axis_gizmo(self, centre_x, centre_y, radius,
-                           rotate_x_deg, rotate_y_deg):
+    def _draw_3d_axis_gizmo(self, centre_x, centre_y, radius,
+                            rotate_x_deg, rotate_y_deg):
         """Draw a small rotating X/Y/Z axis indicator for a 3D view."""
         colours = {
             "X": (0.78, 0.16, 0.16),
             "Y": (0.18, 0.30, 0.86),
             "Z": (0.20, 0.62, 0.28),
         }
-        for label, dx, dy, _ in self.axis_gizmo_axes(
+        for label, dx, dy, _ in self._axis_gizmo_axes(
             rotate_x_deg, rotate_y_deg
         ):
             tip_x = centre_x + dx * radius
             tip_y = centre_y + dy * radius
             length = math.hypot(tip_x - centre_x, tip_y - centre_y)
-            self.set_colour(*colours[label])
+            self._set_colour(*colours[label])
             GL.glLineWidth(2.4)
             GL.glBegin(GL.GL_LINES)
             GL.glVertex2f(centre_x, centre_y)
@@ -2039,21 +2108,21 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 colours[label]
             )
         GL.glLineWidth(1.0)
-        self.draw_circle(
-            centre_x, centre_y, 2.4, self.theme_colour("text")
+        self._draw_circle(
+            centre_x, centre_y, 2.4, self._theme_colour("text")
         )
 
-    def draw_3d_trace_view(self, plot_x, plot_y, plot_width, plot_height,
-                           monitor_items, first_cycle, cycle_count,
-                           first_row, use_blank=False):
+    def _draw_3d_trace_view(self, plot_x, plot_y, plot_width, plot_height,
+                            monitor_items, first_cycle, cycle_count,
+                            first_row, use_blank=False):
         """Render the visible monitor window in a perspective sub-viewport."""
-        self.draw_rectangle(
+        self._draw_rectangle(
             (plot_x, plot_y, plot_width, plot_height),
-            self.theme_colour("scope_bg"),
-            self.theme_colour("grid_minor"),
+            self._theme_colour("scope_bg"),
+            self._theme_colour("grid_minor"),
         )
 
-        viewport = self.canvas_pixel_rect(
+        viewport = self._canvas_pixel_rect(
             (plot_x, plot_y, plot_width, plot_height)
         )
         if viewport is None:
@@ -2067,12 +2136,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         row_depth = 8.5
         cycle_span = cycle_count * cycle_pitch
         row_span = max(row_count - 1, 0) * row_pitch
-        camera_distance, far_plane = self.fit_3d_camera_distance(
+        camera_distance, far_plane = self._fit_3d_camera_distance(
             width, height, cycle_span, row_span, row_depth,
             self.trace_3d_rotate_x, self.trace_3d_rotate_y, self.trace_3d_zoom
         )
         aspect = width / max(height, 1)
-        self.scope_geometry["rows_3d"] = self.build_3d_scope_row_hits(
+        self.scope_geometry["rows_3d"] = self._build_3d_scope_row_hits(
             viewport, monitor_items, cycle_span, row_span, row_pitch,
             camera_distance, aspect
         )
@@ -2099,39 +2168,39 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glRotatef(self.trace_3d_rotate_y, 0.0, 1.0, 0.0)
             GL.glTranslatef(-cycle_span / 2, -9.0, row_span / 2)
 
-            self.configure_3d_lighting()
-            self.draw_3d_floor(
+            self._configure_3d_lighting()
+            self._draw_3d_floor(
                 cycle_count, row_count, cycle_pitch, row_pitch, first_cycle
             )
 
             for index, monitor_item in enumerate(monitor_items):
                 (device_id, output_id), signal_list = monitor_item
                 z_pos = -index * row_pitch
-                colour = self.trace_colour_for_monitor(
+                colour = self._trace_colour_for_monitor(
                     device_id, output_id,
-                    self.signal_colour_index(device_id, output_id)
+                    self._signal_colour_index(device_id, output_id)
                 )
-                visible_signals = self.visible_signal_window(
+                visible_signals = self._visible_signal_window(
                     signal_list, first_cycle, cycle_count, use_blank
                 )
                 previous_signal = None
                 if not use_blank and 0 < first_cycle <= len(signal_list):
                     previous_signal = signal_list[first_cycle - 1]
-                self.draw_3d_monitor_row(
+                self._draw_3d_monitor_row(
                     visible_signals, previous_signal, z_pos, colour,
                     cycle_pitch, row_depth
                 )
         finally:
             GL.glLineWidth(1.0)
-            self.configure_2d_projection(size)
-        self.draw_3d_axis_gizmo(
+            self._configure_2d_projection(size)
+        self._draw_3d_axis_gizmo(
             plot_x + 40, plot_y + 42, 24,
             self.trace_3d_rotate_x, self.trace_3d_rotate_y
         )
 
-    def build_3d_scope_row_hits(self, viewport, monitor_items, cycle_span,
-                                row_span, row_pitch, camera_distance,
-                                aspect):
+    def _build_3d_scope_row_hits(self, viewport, monitor_items, cycle_span,
+                                 row_span, row_pitch, camera_distance,
+                                 aspect):
         """Return projected screen segments for each visible 3D scope row.
 
         Each entry carries the signal name and the on-screen endpoints of
@@ -2152,17 +2221,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             (device_id, output_id), _ = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
             z_pos = -index * row_pitch + row_span / 2
-            start = self.project_3d_trace_point(
+            start = self._project_3d_trace_point(
                 -cycle_span / 2, 0.0, z_pos, camera
             )
-            end = self.project_3d_trace_point(
+            end = self._project_3d_trace_point(
                 cycle_span / 2, 0.0, z_pos, camera
             )
             if start is not None and end is not None:
                 rows.append({"name": name, "start": start, "end": end})
         return rows
 
-    def project_3d_trace_point(self, x_pos, y_pos, z_pos, camera):
+    def _project_3d_trace_point(self, x_pos, y_pos, z_pos, camera):
         """Project a 3D trace-scene point to canvas coordinates.
 
         Mirrors the GL camera exactly (rotate, pan, perspective) so the
@@ -2170,7 +2239,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         for points at or behind the camera plane.
         """
         view_x, view_y, view_width, view_height = camera["viewport"]
-        rotated = self.rotate_scene_corner(
+        rotated = self._rotate_scene_corner(
             x_pos, y_pos, z_pos,
             math.radians(camera["rotate_x"]),
             math.radians(camera["rotate_y"]),
@@ -2191,12 +2260,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             (pixel_y - self.pan_y) / self.zoom,
         )
 
-    def pick_3d_scope_row(self, x_pos, y_pos, max_distance=14.0):
+    def _pick_3d_scope_row(self, x_pos: float, y_pos: float,
+                           max_distance: float = 14.0) -> str | None:
         """Return the signal name of the 3D scope row under the cursor."""
         best_name = None
         best_distance = max_distance
         for row in self.scope_geometry.get("rows_3d") or []:
-            distance = self.point_segment_distance(
+            distance = self._point_segment_distance(
                 x_pos, y_pos,
                 row["start"][0], row["start"][1],
                 row["end"][0], row["end"][1],
@@ -2206,23 +2276,25 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 best_name = row["name"]
         return best_name
 
-    def point_segment_distance(self, px, py, ax, ay, bx, by):
+    def _point_segment_distance(self, px: float, py: float,
+                                ax: float, ay: float, bx: float,
+                                by: float) -> float:
         """Return the distance from a point to a 2D line segment."""
         dx = bx - ax
         dy = by - ay
         length_sq = dx * dx + dy * dy
         if length_sq <= 0.0:
             return math.hypot(px - ax, py - ay)
-        t = self.clamp(((px - ax) * dx + (py - ay) * dy) / length_sq, 0, 1)
+        t = self._clamp(((px - ax) * dx + (py - ay) * dy) / length_sq, 0, 1)
         return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 
-    def update_3d_hover(self, x_pos, y_pos):
+    def _update_3d_hover(self, x_pos, y_pos):
         """Show the hovered 3D trace's signal name as a tooltip."""
         name = None
-        if self.trace_display_3d and self.point_in_rect(
+        if self.trace_display_3d and self._point_in_rect(
             x_pos, y_pos, self.scope_geometry.get("plot")
         ):
-            name = self.pick_3d_scope_row(x_pos, y_pos)
+            name = self._pick_3d_scope_row(x_pos, y_pos)
         if name != self.hover_3d_name:
             self.hover_3d_name = name
             if name:
@@ -2230,7 +2302,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             else:
                 self.UnsetToolTip()
 
-    def configure_3d_lighting(self):
+    def _configure_3d_lighting(self):
         """Configure simple lighting for raised signal blocks."""
         GL.glEnable(GL.GL_COLOR_MATERIAL)
         GL.glEnable(GL.GL_LIGHTING)
@@ -2240,15 +2312,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLightfv(GL.GL_LIGHT0, GL.GL_POSITION, [0.0, 80.0, 120.0, 0.0])
         GL.glColorMaterial(GL.GL_FRONT, GL.GL_AMBIENT_AND_DIFFUSE)
 
-    def draw_3d_floor(self, cycle_count, row_count, cycle_pitch, row_pitch,
-                      first_cycle):
+    def _draw_3d_floor(self, cycle_count, row_count, cycle_pitch, row_pitch,
+                       first_cycle):
         """Draw a floor grid that preserves time and monitor-row context."""
         x_end = cycle_count * cycle_pitch
         z_top = row_pitch * 0.55
         z_bottom = -(row_count - 1) * row_pitch - row_pitch * 0.55
 
         GL.glDisable(GL.GL_LIGHTING)
-        self.set_colour(*self.theme_colour("grid_minor"))
+        self._set_colour(*self._theme_colour("grid_minor"))
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex3f(0.0, -0.15, z_top)
         GL.glVertex3f(x_end, -0.15, z_top)
@@ -2260,50 +2332,50 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glBegin(GL.GL_LINES)
         for cycle in range(cycle_count + 1):
             if (first_cycle + cycle) % 5 == 0:
-                self.set_colour(*self.theme_colour("grid_major"))
+                self._set_colour(*self._theme_colour("grid_major"))
             else:
-                self.set_colour(*self.theme_colour("grid_row"))
+                self._set_colour(*self._theme_colour("grid_row"))
             x_pos = cycle * cycle_pitch
             GL.glVertex3f(x_pos, 0.0, z_top)
             GL.glVertex3f(x_pos, 0.0, z_bottom)
 
         for row in range(row_count):
             z_pos = -row * row_pitch
-            self.set_colour(*self.theme_colour("level_guide"))
+            self._set_colour(*self._theme_colour("level_guide"))
             GL.glVertex3f(0.0, 0.0, z_pos)
             GL.glVertex3f(x_end, 0.0, z_pos)
         GL.glEnd()
 
-    def draw_3d_monitor_row(self, signals, previous_signal, z_pos, colour,
-                            cycle_pitch, row_depth):
+    def _draw_3d_monitor_row(self, signals, previous_signal, z_pos, colour,
+                             cycle_pitch, row_depth):
         """Draw one monitor row as level-height blocks through time."""
-        previous_height = self.signal_height_3d(previous_signal)
+        previous_height = self._signal_height_3d(previous_signal)
         for index, signal in enumerate(signals):
             x_start = index * cycle_pitch
             x_center = x_start + cycle_pitch / 2
-            height = self.signal_height_3d(signal)
+            height = self._signal_height_3d(signal)
             if height is None:
-                self.draw_3d_blank_segment(
+                self._draw_3d_blank_segment(
                     x_start, x_start + cycle_pitch, z_pos
                 )
                 previous_height = None
                 continue
 
             if previous_height is not None and previous_height != height:
-                self.draw_3d_edge_wall(
+                self._draw_3d_edge_wall(
                     x_start, z_pos, row_depth / 2,
                     max(previous_height, height),
                     colour
                 )
 
-            self.set_colour(*self.trace_3d_level_colour(colour, signal))
-            self.draw_3d_cuboid(
+            self._set_colour(*self._trace_3d_level_colour(colour, signal))
+            self._draw_3d_cuboid(
                 x_center, z_pos, cycle_pitch * 0.44, row_depth / 2, height
             )
             previous_height = height
 
-    def visible_signal_window(self, signal_list, first_cycle, cycle_count,
-                              use_blank=False):
+    def _visible_signal_window(self, signal_list, first_cycle, cycle_count,
+                               use_blank=False):
         """Return a fixed-length visible signal slice for trace rendering."""
         if use_blank:
             return [self.devices.BLANK] * cycle_count
@@ -2315,7 +2387,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             visible_signals.extend([self.devices.BLANK] * missing_cycles)
         return visible_signals
 
-    def signal_height_3d(self, signal):
+    def _signal_height_3d(self, signal: int | None) -> float | None:
         """Map a simulator signal to a 3D height, or None for blanks."""
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return 18.0
@@ -2323,17 +2395,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return 5.0
         return None
 
-    def trace_3d_level_colour(self, colour, signal):
+    def _trace_3d_level_colour(self, colour, signal):
         """Dim low-level blocks while keeping the monitor colour identity."""
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return colour
-        return tuple(self.clamp(component * 0.55 + 0.12, 0.0, 1.0)
+        return tuple(self._clamp(component * 0.55 + 0.12, 0.0, 1.0)
                      for component in colour)
 
-    def draw_3d_blank_segment(self, x_start, x_end, z_pos):
+    def _draw_3d_blank_segment(self, x_start, x_end, z_pos):
         """Draw a dashed mid-level marker for cycles without recorded data."""
         GL.glDisable(GL.GL_LIGHTING)
-        self.set_colour(*self.theme_colour("blank_signal"))
+        self._set_colour(*self._theme_colour("blank_signal"))
         dash = 5.0
         x_pos = x_start + 1.0
         GL.glBegin(GL.GL_LINES)
@@ -2343,12 +2415,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             x_pos += dash * 2
         GL.glEnd()
 
-    def draw_3d_edge_wall(self, x_pos, z_pos, half_depth, height, colour):
+    def _draw_3d_edge_wall(self, x_pos, z_pos, half_depth, height, colour):
         """Draw a thin vertical transition marker between two levels."""
-        self.set_colour(*colour)
-        self.draw_3d_cuboid(x_pos, z_pos, 0.75, half_depth, height)
+        self._set_colour(*colour)
+        self._draw_3d_cuboid(x_pos, z_pos, 0.75, half_depth, height)
 
-    def draw_3d_cuboid(self, x_pos, z_pos, half_width, half_depth, height):
+    def _draw_3d_cuboid(self, x_pos, z_pos, half_width, half_depth, height):
         """Draw a raised rectangular signal block."""
         GL.glEnable(GL.GL_LIGHTING)
         GL.glBegin(GL.GL_QUADS)
@@ -2389,43 +2461,44 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glVertex3f(x_pos + half_width, height, z_pos + half_depth)
         GL.glEnd()
 
-    def draw_scope_header(self, bounds, title=None):
+    def _draw_scope_header(self, bounds, title=None):
         """Draw the oscilloscope title strip."""
         x_pos, y_pos, width, height = bounds
         header_bounds = (x_pos, y_pos + height - 28, width, 28)
-        self.draw_rectangle(
+        self._draw_rectangle(
             header_bounds,
-            self.theme_colour("scope_header"),
-            self.theme_colour("scope_header_border"),
+            self._theme_colour("scope_header"),
+            self._theme_colour("scope_header_border"),
         )
         if title is None:
-            title = self.text("oscilloscope")
+            title = self._text("oscilloscope")
         self.render_text(title, x_pos + 30, y_pos + height - 18)
-        self.draw_rectangle(
+        self._draw_rectangle(
             (x_pos + 9, y_pos + height - 21, 12, 12),
-            self.theme_colour("scope_icon"),
-            self.theme_colour("scope_icon_border"),
+            self._theme_colour("scope_icon"),
+            self._theme_colour("scope_icon_border"),
         )
 
-    def draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
+    def _draw_scope_grid(self, plot_x, plot_y, width, height, cycle_count):
         """Draw oscilloscope grid lines."""
         GL.glBegin(GL.GL_LINES)
         for cycle in range(cycle_count + 1):
             if cycle % 5 == 0:
-                self.set_colour(*self.theme_colour("grid_major"))
+                self._set_colour(*self._theme_colour("grid_major"))
             else:
-                self.set_colour(*self.theme_colour("grid_minor"))
+                self._set_colour(*self._theme_colour("grid_minor"))
             x_pos = plot_x + cycle * self.cycle_width
             GL.glVertex2f(x_pos, plot_y)
             GL.glVertex2f(x_pos, plot_y + height)
 
         for row in range(0, int(height), 24):
-            self.set_colour(*self.theme_colour("grid_row"))
+            self._set_colour(*self._theme_colour("grid_row"))
             GL.glVertex2f(plot_x, plot_y + row)
             GL.glVertex2f(plot_x + width, plot_y + row)
         GL.glEnd()
 
-    def scope_visible_rows(self, plot_height, total_rows):
+    def _scope_visible_rows(self, plot_height: float,
+                            total_rows: int) -> int:
         """Return how many monitor rows fit at the current vertical zoom.
 
         A smaller ``scope_row_zoom`` packs more signals into the plot so the
@@ -2437,7 +2510,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         visible = max(1, int(plot_height // slot_height))
         return min(visible, total_rows)
 
-    def scope_row_gap(self, plot_height, count):
+    def _scope_row_gap(self, plot_height: float,
+                       count: int) -> float:
         """Return the spacing that spreads ``count`` rows over the plot.
 
         The visible rows always fill the plot height; the gap is floored so
@@ -2445,18 +2519,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         not drift far apart.
         """
         gap = plot_height / max(count, 1)
-        return self.clamp(gap, self.min_row_band, 88.0)
+        return self._clamp(gap, self.min_row_band, 88.0)
 
-    def scope_row_amplitude(self, row_gap):
+    def _scope_row_amplitude(self, row_gap: float) -> float:
         """Return a waveform half-height that fits inside one row's band."""
-        return self.clamp(row_gap * 0.42, 4.0, self.high_offset)
+        return self._clamp(row_gap * 0.42, 4.0, self.high_offset)
 
-    def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
-                        monitor_items, first_cycle, cycle_count,
-                        first_row):
+    def _draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+                         monitor_items, first_cycle, cycle_count,
+                         first_row):
         """Draw all monitored signal names and waveforms."""
-        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
-        high_off = self.scope_row_amplitude(row_gap)
+        row_gap = self._scope_row_gap(plot_height, len(monitor_items))
+        high_off = self._scope_row_amplitude(row_gap)
         low_off = self.low_offset * high_off / self.high_offset
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), signal_list = monitor_item
@@ -2464,30 +2538,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             row_mid = plot_y + plot_height - row_gap * 0.5 - index * row_gap
             row_base = row_mid - high_off / 2
 
-            colour = self.trace_colour_for_monitor(
+            colour = self._trace_colour_for_monitor(
                 device_id, output_id,
-                self.signal_colour_index(device_id, output_id)
+                self._signal_colour_index(device_id, output_id)
             )
-            self.set_colour(*colour)
+            self._set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
-            self.draw_signal_level_scale(
+            self._draw_signal_level_scale(
                 plot_x, plot_y, plot_height, row_base, row_gap,
                 high_off, low_off
             )
             visible_signals = signal_list[
                 first_cycle:first_cycle + cycle_count
             ]
-            self.draw_digital_signal(
+            self._draw_digital_signal(
                 plot_x, row_base, visible_signals, colour, high_off, low_off
             )
 
-    def draw_signal_level_scale(self, plot_x, plot_y, plot_height, row_base,
-                                row_gap, high_off, low_off):
+    def _draw_signal_level_scale(self, plot_x, plot_y, plot_height, row_base,
+                                 row_gap, high_off, low_off):
         """Draw 1/0 scale labels and guide lines for one waveform row."""
         high_y = row_base + high_off
         low_y = row_base + low_off
 
-        self.set_colour(*self.theme_colour("level_mark"))
+        self._set_colour(*self._theme_colour("level_mark"))
         GL.glBegin(GL.GL_LINES)
         GL.glVertex2f(plot_x, high_y)
         GL.glVertex2f(plot_x + 8, high_y)
@@ -2497,12 +2571,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         if row_gap >= 18:
             self.render_text("1", plot_x - 18, high_y - 4,
-                             self.theme_colour("subtle_text"))
+                             self._theme_colour("subtle_text"))
             self.render_text("0", plot_x - 18, low_y - 4,
-                             self.theme_colour("subtle_text"))
+                             self._theme_colour("subtle_text"))
 
         if row_gap >= 26:
-            self.set_colour(*self.theme_colour("level_guide"))
+            self._set_colour(*self._theme_colour("level_guide"))
             GL.glBegin(GL.GL_LINES)
             GL.glVertex2f(plot_x, high_y)
             GL.glVertex2f(plot_x + 40, high_y)
@@ -2510,11 +2584,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(plot_x + 40, low_y)
             GL.glEnd()
 
-    def draw_empty_scope_rows(self, label_x, plot_x, plot_y, plot_height,
-                              monitor_items, cycle_count, first_row):
+    def _draw_empty_scope_rows(self, label_x, plot_x, plot_y, plot_height,
+                               monitor_items, cycle_count, first_row):
         """Draw aligned monitor rows before any signal data is recorded."""
-        row_gap = self.scope_row_gap(plot_height, len(monitor_items))
-        high_off = self.scope_row_amplitude(row_gap)
+        row_gap = self._scope_row_gap(plot_height, len(monitor_items))
+        high_off = self._scope_row_amplitude(row_gap)
         low_off = self.low_offset * high_off / self.high_offset
         blank_signals = [self.devices.BLANK] * cycle_count
         for index, monitor_item in enumerate(monitor_items):
@@ -2523,21 +2597,21 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             row_mid = plot_y + plot_height - row_gap * 0.5 - index * row_gap
             row_base = row_mid - high_off / 2
 
-            colour = self.trace_colour_for_monitor(
+            colour = self._trace_colour_for_monitor(
                 device_id, output_id,
-                self.signal_colour_index(device_id, output_id)
+                self._signal_colour_index(device_id, output_id)
             )
             self.render_text(name, label_x + 14, row_mid - 5, colour)
-            self.draw_signal_level_scale(
+            self._draw_signal_level_scale(
                 plot_x, plot_y, plot_height, row_base, row_gap,
                 high_off, low_off
             )
-            self.draw_digital_signal(
+            self._draw_digital_signal(
                 plot_x, row_base, blank_signals, colour, high_off, low_off
             )
 
-    def draw_digital_signal(self, plot_x, row_base, signal_list, colour,
-                            high_off, low_off):
+    def _draw_digital_signal(self, plot_x, row_base, signal_list, colour,
+                             high_off, low_off):
         """Draw one digital signal as a continuous square waveform."""
         high_y = row_base + high_off
         low_y = row_base + low_off
@@ -2548,16 +2622,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             x_end = x_start + self.cycle_width
 
             if signal == self.devices.BLANK:
-                self.draw_blank_signal(x_start, x_end, row_base, high_off,
-                                       low_off)
+                self._draw_blank_signal(x_start, x_end, row_base, high_off,
+                                        low_off)
                 previous_y = None
                 continue
 
-            current_y = self.signal_y(signal, high_y, low_y)
+            current_y = self._signal_y(signal, high_y, low_y)
             if current_y is None:
                 continue
 
-            self.set_colour(*colour)
+            self._set_colour(*colour)
             GL.glLineWidth(2.0)
             GL.glBegin(GL.GL_LINE_STRIP)
             if previous_y is None:
@@ -2571,7 +2645,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glLineWidth(1.0)
             previous_y = current_y
 
-    def signal_y(self, signal, high_y, low_y):
+    def _signal_y(self, signal, high_y, low_y):
         """Map a simulator signal level to a stable y position."""
         if signal in [self.devices.HIGH, self.devices.RISING]:
             return high_y
@@ -2579,17 +2653,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return low_y
         return None
 
-    def signal_colour_index(self, device_id, output_id):
+    def _signal_colour_index(self, device_id, output_id):
         """Return a palette index fixed to the signal's identity.
 
         Indexing colours by the monitored signal rather than its current row
         keeps every trace the same colour as other monitors are added or
         removed.
         """
-        order = self.signal_colour_order()
+        order = self._signal_colour_order()
         return order.get((device_id, output_id), len(order))
 
-    def signal_colour_order(self):
+    def _signal_colour_order(self):
         """Return cached colour indices for every output in the circuit.
 
         The cache is keyed on the active devices object, so it is rebuilt
@@ -2599,13 +2673,13 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if cache is None or cache[0] is not self.devices:
             order = {}
             for device in self.devices.devices_list:
-                for output_id in self.sorted_port_ids(device.outputs):
+                for output_id in self._sorted_port_ids(device.outputs):
                     order[(device.device_id, output_id)] = len(order)
             cache = (self.devices, order)
             self._signal_colour_cache = cache
         return cache[1]
 
-    def trace_colour_for_monitor(self, device_id, output_id, index):
+    def _trace_colour_for_monitor(self, device_id, output_id, index):
         """Return a trace colour, with clocks highlighted in green."""
         if self.colour_blind_mode:
             colours = self.colour_blind_trace_colours
@@ -2618,11 +2692,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return (0.48, 0.30, 0.68)
         return self.trace_colours[index % len(self.trace_colours)]
 
-    def draw_blank_signal(self, x_start, x_end, row_base, high_off, low_off):
+    def _draw_blank_signal(self, x_start, x_end, row_base, high_off, low_off):
         """Draw a blank signal interval for monitors added mid-run."""
         mid_y = row_base + (high_off + low_off) / 2
         dash_width = 5
-        self.set_colour(*self.theme_colour("blank_signal"))
+        self._set_colour(*self._theme_colour("blank_signal"))
         GL.glBegin(GL.GL_LINES)
         while x_start < x_end:
             GL.glVertex2f(x_start, mid_y)
@@ -2630,10 +2704,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             x_start += dash_width * 2
         GL.glEnd()
 
-    def draw_scope_scrollbars(self, bounds, plot_x, plot_y, plot_width,
-                              plot_height, first_cycle, max_cycles,
-                              cycle_count, first_row, total_rows,
-                              visible_rows):
+    def _draw_scope_scrollbars(self, bounds, plot_x, plot_y, plot_width,
+                               plot_height, first_cycle, max_cycles,
+                               cycle_count, first_row, total_rows,
+                               visible_rows):
         """Draw oscilloscope scrollbars and save their hit targets."""
         x_pos, y_pos, width, _ = bounds
         right_x = plot_x + plot_width + 6
@@ -2641,16 +2715,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "plot": (plot_x, plot_y, plot_width, plot_height),
             "max_first_cycle": max(max_cycles - cycle_count, 0),
             "max_first_row": max(total_rows - visible_rows, 0),
-            # Keep the 3D hover rows stored by draw_3d_trace_view earlier
+            # Keep the 3D hover rows stored by _draw_3d_trace_view earlier
             # in this same frame.
             "rows_3d": self.scope_geometry.get("rows_3d"),
         }
 
         vertical_track = (right_x, plot_y, 10, plot_height)
-        self.draw_rectangle(
+        self._draw_rectangle(
             vertical_track,
-            self.theme_colour("scrollbar_track"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_track"),
+            self._theme_colour("scrollbar_border"),
         )
         if total_rows > visible_rows:
             thumb_height = max(28, plot_height * visible_rows / total_rows)
@@ -2660,30 +2734,30 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             thumb_height = max(28, plot_height * 0.55)
             thumb_y = plot_y + (plot_height - thumb_height) / 2
         vertical_thumb = (right_x + 1, thumb_y, 8, thumb_height)
-        self.draw_rectangle(
+        self._draw_rectangle(
             vertical_thumb,
-            self.theme_colour("scrollbar_thumb"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_thumb"),
+            self._theme_colour("scrollbar_border"),
         )
 
         bar_y = y_pos + 34
         bar_x = plot_x
         bar_width = plot_width
         horizontal_track = (bar_x, bar_y, bar_width, 13)
-        self.draw_rectangle(
+        self._draw_rectangle(
             horizontal_track,
-            self.theme_colour("scrollbar_track"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_track"),
+            self._theme_colour("scrollbar_border"),
         )
-        self.draw_rectangle(
+        self._draw_rectangle(
             (bar_x - 12, bar_y, 12, 13),
-            self.theme_colour("scrollbar_step"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_step"),
+            self._theme_colour("scrollbar_border"),
         )
-        self.draw_rectangle(
+        self._draw_rectangle(
             (bar_x + bar_width, bar_y, 12, 13),
-            self.theme_colour("scrollbar_step"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_step"),
+            self._theme_colour("scrollbar_border"),
         )
 
         if max_cycles > cycle_count:
@@ -2694,10 +2768,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             thumb_width = max(44, bar_width * 0.55)
             thumb_x = bar_x + (bar_width - thumb_width) / 2
         horizontal_thumb = (thumb_x, bar_y + 2, thumb_width, 9)
-        self.draw_rectangle(
+        self._draw_rectangle(
             horizontal_thumb,
-            self.theme_colour("scrollbar_thumb"),
-            self.theme_colour("scrollbar_border"),
+            self._theme_colour("scrollbar_thumb"),
+            self._theme_colour("scrollbar_border"),
         )
         self.scope_geometry.update({
             "vertical_track": vertical_track,
@@ -2707,15 +2781,15 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         })
         self.render_text(
             "<", bar_x - 9, bar_y + 2,
-            self.theme_colour("scrollbar_arrow")
+            self._theme_colour("scrollbar_arrow")
         )
         self.render_text(">", bar_x + bar_width + 4, bar_y + 2,
-                         self.theme_colour("scrollbar_arrow"))
+                         self._theme_colour("scrollbar_arrow"))
 
-    def draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle,
-                        max_cycles):
+    def _draw_scope_axis(self, plot_x, plot_y, cycle_count, first_cycle,
+                         max_cycles):
         """Draw cycle tick labels along the bottom of the scope."""
-        self.set_colour(*self.theme_colour("axis"))
+        self._set_colour(*self._theme_colour("axis"))
         GL.glBegin(GL.GL_LINES)
         GL.glVertex2f(plot_x, plot_y)
         GL.glVertex2f(plot_x + cycle_count * self.cycle_width, plot_y)
@@ -2734,24 +2808,24 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         last_cycle = max(first_cycle + cycle_count - 1, first_cycle)
         last_cycle = min(last_cycle, max(max_cycles - 1, 0))
         self.render_text(
-            self.text("cycles_shown").format(
+            self._text("cycles_shown").format(
                 first=first_cycle, last=last_cycle
             ),
-            plot_x + 28, plot_y - 76, self.theme_colour("axis")
+            plot_x + 28, plot_y - 76, self._theme_colour("axis")
         )
         self.render_text(
-            self.text("level"), plot_x - 38, plot_y - 76,
-            self.theme_colour("subtle_text")
+            self._text("level"), plot_x - 38, plot_y - 76,
+            self._theme_colour("subtle_text")
         )
 
-    def max_recorded_cycles(self, monitor_items):
+    def _max_recorded_cycles(self, monitor_items: list) -> int:
         """Return the longest recorded monitor trace."""
         max_cycles = 0
         for _, signal_list in monitor_items:
             max_cycles = max(max_cycles, len(signal_list))
         return max_cycles
 
-    def calculate_scope_label_width(self, monitor_items):
+    def _calculate_scope_label_width(self, monitor_items):
         """Return enough left margin to fit monitor labels."""
         longest_name = 0
         for (device_id, output_id), _ in monitor_items:
@@ -2759,17 +2833,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             longest_name = max(longest_name, len(str(monitor_name)))
         return max(116, 28 + longest_name * 8)
 
-    def sorted_port_ids(self, port_dictionary):
+    def _sorted_port_ids(self, port_dictionary):
         """Return port IDs ordered by their display names."""
-        return sorted(port_dictionary, key=self.port_sort_name)
+        return sorted(port_dictionary, key=self._port_sort_name)
 
-    def port_sort_name(self, port_id):
+    def _port_sort_name(self, port_id):
         """Return a stable display name for sorting port IDs."""
         if port_id is None:
             return ""
         return str(self.devices.names.get_name_string(port_id))
 
-    def canvas_pixel_rect(self, bounds):
+    def _canvas_pixel_rect(self, bounds):
         """Return transformed integer canvas pixels for a drawing rectangle."""
         x_pos, y_pos, width, height = bounds
         size = self.GetClientSize()
@@ -2786,9 +2860,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return None
         return left, bottom, right - left, top - bottom
 
-    def begin_scissor(self, bounds):
+    def _begin_scissor(self, bounds):
         """Clip OpenGL drawing to a canvas-space rectangle."""
-        rect = self.canvas_pixel_rect(bounds)
+        rect = self._canvas_pixel_rect(bounds)
         if rect is None:
             return
 
@@ -2796,14 +2870,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnable(GL.GL_SCISSOR_TEST)
         GL.glScissor(x_pos, y_pos, width, height)
 
-    def end_scissor(self):
+    def _end_scissor(self):
         """Disable OpenGL clipping."""
         GL.glDisable(GL.GL_SCISSOR_TEST)
 
-    def draw_rectangle(self, bounds, fill_colour, border_colour=None):
+    def _draw_rectangle(self, bounds, fill_colour, border_colour=None):
         """Draw a filled rectangle with an optional border."""
         x_pos, y_pos, width, height = bounds
-        self.set_colour(*fill_colour)
+        self._set_colour(*fill_colour)
         GL.glBegin(GL.GL_QUADS)
         GL.glVertex2f(x_pos, y_pos)
         GL.glVertex2f(x_pos + width, y_pos)
@@ -2812,7 +2886,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glEnd()
 
         if border_colour is not None:
-            self.set_colour(*border_colour)
+            self._set_colour(*border_colour)
             GL.glBegin(GL.GL_LINE_LOOP)
             GL.glVertex2f(x_pos, y_pos)
             GL.glVertex2f(x_pos + width, y_pos)
@@ -2820,9 +2894,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(x_pos, y_pos + height)
             GL.glEnd()
 
-    def draw_circle(self, x_pos, y_pos, radius, fill_colour):
+    def _draw_circle(self, x_pos, y_pos, radius, fill_colour):
         """Draw a filled circular marker."""
-        self.set_colour(*fill_colour)
+        self._set_colour(*fill_colour)
         GL.glBegin(GL.GL_TRIANGLE_FAN)
         GL.glVertex2f(x_pos, y_pos)
         for index in range(25):
@@ -2832,7 +2906,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 y_pos + radius * math.sin(angle),
             )
         GL.glEnd()
-        self.set_colour(*self.theme_colour("pin_border"))
+        self._set_colour(*self._theme_colour("pin_border"))
         GL.glBegin(GL.GL_LINE_LOOP)
         for index in range(24):
             angle = 2 * 3.141592653589793 * index / 24
@@ -2842,11 +2916,11 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
         GL.glEnd()
 
-    def set_signal_colour(self, signal):
+    def _set_signal_colour(self, signal):
         """Set colour for circuit wires according to signal level."""
-        self.set_colour(*self.signal_colour(signal))
+        self._set_colour(*self._signal_colour(signal))
 
-    def signal_colour(self, signal):
+    def _signal_colour(self, signal):
         """Return colour for a signal level."""
         if self.colour_blind_mode:
             if signal in [self.devices.HIGH, self.devices.RISING]:
@@ -2862,17 +2936,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return (0.28, 0.28, 0.30)
         return (0.70, 0.70, 0.70)
 
-    def on_paint(self, event):
+    def on_paint(self, event: wx.PaintEvent) -> None:
         """Handle repaint requests."""
         wx.PaintDC(self)
         self.render()
 
-    def on_size(self, event):
+    def on_size(self, event: wx.SizeEvent) -> None:
         """Reconfigure the OpenGL projection after resizing."""
         self.init = False
         event.Skip()
 
-    def on_mouse(self, event):
+    def on_mouse(self, event: wx.MouseEvent) -> None:
         """Handle scrolling and 3D rotation inside the circuit and scope.
 
         The whole-canvas pan and zoom are intentionally disabled so the
@@ -2887,32 +2961,32 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         if event.ButtonDown():
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
-            if self.start_circuit_3d_drag(object_x, object_y):
+            if self._start_circuit_3d_drag(object_x, object_y):
                 return
-            if self.start_circuit_scroll_drag(object_x, object_y):
+            if self._start_circuit_scroll_drag(object_x, object_y):
                 return
-            if self.start_scope_scroll_drag(object_x, object_y):
+            if self._start_scope_scroll_drag(object_x, object_y):
                 return
-            if self.start_3d_trace_drag(object_x, object_y):
+            if self._start_3d_trace_drag(object_x, object_y):
                 return
 
         if event.Dragging() and self.circuit_3d_drag_active:
-            self.update_circuit_3d_drag(event)
+            self._update_circuit_3d_drag(event)
             self.Refresh()
             return
 
         if event.Dragging() and self.circuit_drag_mode is not None:
-            self.update_circuit_scroll_drag(object_x, object_y)
+            self._update_circuit_scroll_drag(object_x, object_y)
             self.Refresh()
             return
 
         if event.Dragging() and self.scope_drag_mode is not None:
-            self.update_scope_scroll_drag(object_x, object_y)
+            self._update_scope_scroll_drag(object_x, object_y)
             self.Refresh()
             return
 
         if event.Dragging() and self.trace_3d_drag_active:
-            self.update_3d_trace_drag(event)
+            self._update_3d_trace_drag(event)
             self.Refresh()
             return
 
@@ -2923,39 +2997,39 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_3d_drag_active = False
 
         if event.Moving():
-            self.update_3d_hover(object_x, object_y)
+            self._update_3d_hover(object_x, object_y)
 
         wheel_rotation = event.GetWheelRotation()
-        if wheel_rotation != 0 and self.wheel_circuit(
+        if wheel_rotation != 0 and self._wheel_circuit(
             object_x, object_y, wheel_rotation
         ):
             self.Refresh()
             return
 
-        if wheel_rotation != 0 and self.zoom_3d_trace_view(
+        if wheel_rotation != 0 and self._zoom_3d_trace_view(
             object_x, object_y, wheel_rotation
         ):
             self.Refresh()
             return
 
-        if wheel_rotation != 0 and self.wheel_scope(
+        if wheel_rotation != 0 and self._wheel_scope(
             object_x, object_y, wheel_rotation
         ):
             self.Refresh()
             return
 
-    def start_circuit_3d_drag(self, x_pos, y_pos):
+    def _start_circuit_3d_drag(self, x_pos, y_pos):
         """Start rotating the 3D circuit view when it is clicked."""
         if not self.circuit_display_3d:
             return False
-        if not self.point_in_rect(x_pos, y_pos,
-                                  self.circuit_geometry.get("view")):
+        if not self._point_in_rect(x_pos, y_pos,
+                                   self.circuit_geometry.get("view")):
             return False
 
         self.circuit_3d_drag_active = True
         return True
 
-    def update_circuit_3d_drag(self, event):
+    def _update_circuit_3d_drag(self, event):
         """Rotate (or, with the right button, pan) the 3D circuit camera."""
         x_delta = event.GetX() - self.last_mouse_x
         y_delta = event.GetY() - self.last_mouse_y
@@ -2967,22 +3041,22 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.circuit_3d_pan_y -= y_delta * scale
             return
         self.circuit_3d_rotate_y += x_delta * 0.5
-        self.circuit_3d_rotate_x = self.clamp(
+        self.circuit_3d_rotate_x = self._clamp(
             self.circuit_3d_rotate_x + y_delta * 0.5, 8.0, 82.0
         )
 
-    def start_3d_trace_drag(self, x_pos, y_pos):
+    def _start_3d_trace_drag(self, x_pos, y_pos):
         """Start rotating or panning the 3D trace view when clicked."""
         if not self.trace_display_3d:
             return False
-        if not self.point_in_rect(x_pos, y_pos,
-                                  self.scope_geometry.get("plot")):
+        if not self._point_in_rect(x_pos, y_pos,
+                                   self.scope_geometry.get("plot")):
             return False
 
         self.trace_3d_drag_active = True
         return True
 
-    def update_3d_trace_drag(self, event):
+    def _update_3d_trace_drag(self, event):
         """Rotate or pan the 3D trace camera during a mouse drag."""
         x_delta = event.GetX() - self.last_mouse_x
         y_delta = event.GetY() - self.last_mouse_y
@@ -2996,63 +3070,65 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return
 
         self.trace_3d_rotate_y += x_delta * 0.55
-        self.trace_3d_rotate_x = self.clamp(
+        self.trace_3d_rotate_x = self._clamp(
             self.trace_3d_rotate_x + y_delta * 0.55, -72.0, 72.0
         )
 
-    def zoom_3d_trace_view(self, x_pos, y_pos, wheel_rotation):
+    def _zoom_3d_trace_view(self, x_pos, y_pos, wheel_rotation):
         """Zoom the perspective trace camera when the wheel is over it."""
         if not self.trace_display_3d:
             return False
-        if not self.point_in_rect(x_pos, y_pos,
-                                  self.scope_geometry.get("plot")):
+        if not self._point_in_rect(x_pos, y_pos,
+                                   self.scope_geometry.get("plot")):
             return False
 
         if wx.GetKeyState(wx.WXK_SHIFT):
-            return self.scroll_scope_rows(x_pos, y_pos, wheel_rotation)
+            return self._scroll_scope_rows(x_pos, y_pos, wheel_rotation)
 
         factor = 1.12 if wheel_rotation > 0 else 1 / 1.12
-        self.trace_3d_zoom = self.clamp(
+        self.trace_3d_zoom = self._clamp(
             self.trace_3d_zoom * factor, 0.35, 3.5
         )
         return True
 
-    def start_circuit_scroll_drag(self, x_pos, y_pos):
+    def _start_circuit_scroll_drag(self, x_pos, y_pos):
         """Start dragging a circuit scrollbar if one was clicked."""
         vertical_track = self.circuit_geometry.get("vertical_track")
         vertical_thumb = self.circuit_geometry.get("vertical_thumb")
         horizontal_track = self.circuit_geometry.get("horizontal_track")
         horizontal_thumb = self.circuit_geometry.get("horizontal_thumb")
 
-        if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+        if self._point_in_rect(x_pos, y_pos, vertical_thumb):
             self.circuit_drag_mode = "vertical"
             self.circuit_drag_offset = y_pos - vertical_thumb[1]
             return True
 
-        if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+        if vertical_thumb and self._point_in_rect(
+            x_pos, y_pos, vertical_track
+        ):
             self.circuit_drag_mode = "vertical"
             self.circuit_drag_offset = vertical_thumb[3] / 2
-            self.update_circuit_scroll_drag(x_pos, y_pos)
+            self._update_circuit_scroll_drag(x_pos, y_pos)
             self.Refresh()
             return True
 
-        if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+        if self._point_in_rect(x_pos, y_pos, horizontal_thumb):
             self.circuit_drag_mode = "horizontal"
             self.circuit_drag_offset = x_pos - horizontal_thumb[0]
             return True
 
-        if horizontal_thumb and self.point_in_rect(
+        if horizontal_thumb and self._point_in_rect(
             x_pos, y_pos, horizontal_track
         ):
             self.circuit_drag_mode = "horizontal"
             self.circuit_drag_offset = horizontal_thumb[2] / 2
-            self.update_circuit_scroll_drag(x_pos, y_pos)
+            self._update_circuit_scroll_drag(x_pos, y_pos)
             self.Refresh()
             return True
 
         return False
 
-    def update_circuit_scroll_drag(self, x_pos, y_pos):
+    def _update_circuit_scroll_drag(self, x_pos, y_pos):
         """Update circuit scroll (2D) or camera pan (3D) during a drag."""
         is_3d = self.circuit_geometry.get("mode") == "3d"
         if self.circuit_drag_mode == "vertical":
@@ -3065,12 +3141,12 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             _, track_y, _, track_height = track
             _, _, _, thumb_height = thumb
             usable = max(track_height - thumb_height, 1)
-            thumb_y = self.clamp(
+            thumb_y = self._clamp(
                 y_pos - self.circuit_drag_offset, track_y, track_y + usable
             )
             fraction = 1 - ((thumb_y - track_y) / usable)
             if is_3d:
-                self.set_circuit_3d_scroll("vertical", fraction)
+                self._set_circuit_3d_scroll("vertical", fraction)
             else:
                 self.circuit_scroll_y = fraction * max_scroll_y
 
@@ -3084,34 +3160,34 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             track_x, _, track_width, _ = track
             _, _, thumb_width, _ = thumb
             usable = max(track_width - thumb_width, 1)
-            thumb_x = self.clamp(
+            thumb_x = self._clamp(
                 x_pos - self.circuit_drag_offset, track_x, track_x + usable
             )
             fraction = (thumb_x - track_x) / usable
             if is_3d:
-                self.set_circuit_3d_scroll("horizontal", fraction)
+                self._set_circuit_3d_scroll("horizontal", fraction)
             else:
                 self.circuit_scroll_x = fraction * max_scroll_x
 
-    def wheel_circuit(self, x_pos, y_pos, wheel_rotation):
+    def _wheel_circuit(self, x_pos, y_pos, wheel_rotation):
         """Zoom the circuit overview, or scroll it with Shift held."""
-        if not self.point_in_rect(x_pos, y_pos,
-                                  self.circuit_geometry.get("view")):
+        if not self._point_in_rect(x_pos, y_pos,
+                                   self.circuit_geometry.get("view")):
             return False
         if self.circuit_display_3d:
             factor = 1.12 if wheel_rotation > 0 else 1.0 / 1.12
-            self.zoom_circuit_3d_at(factor, x_pos, y_pos)
+            self._zoom_circuit_3d_at(factor, x_pos, y_pos)
             return True
         if wx.GetKeyState(wx.WXK_SHIFT):
-            return self.scroll_circuit_view(x_pos, y_pos, wheel_rotation)
+            return self._scroll_circuit_view(x_pos, y_pos, wheel_rotation)
         factor = 1.1 if wheel_rotation > 0 else 1.0 / 1.1
-        self.zoom_circuit_at(factor, x_pos, y_pos)
+        self._zoom_circuit_at(factor, x_pos, y_pos)
         return True
 
-    def scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
+    def _scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
         """Scroll the circuit overview when the wheel is over it."""
         view = self.circuit_geometry.get("view")
-        if not self.point_in_rect(x_pos, y_pos, view):
+        if not self._point_in_rect(x_pos, y_pos, view):
             return False
 
         max_scroll_x = self.circuit_geometry.get("max_scroll_x", 0)
@@ -3121,65 +3197,67 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
         if wx.GetKeyState(wx.WXK_SHIFT) and max_scroll_x > 0:
             step = -48 if wheel_rotation > 0 else 48
-            self.circuit_scroll_x = self.clamp(
+            self.circuit_scroll_x = self._clamp(
                 self.circuit_scroll_x + step, 0, max_scroll_x
             )
             return True
 
         if max_scroll_y > 0:
             step = -48 if wheel_rotation > 0 else 48
-            self.circuit_scroll_y = self.clamp(
+            self.circuit_scroll_y = self._clamp(
                 self.circuit_scroll_y + step, 0, max_scroll_y
             )
             return True
 
         if max_scroll_x > 0:
             step = -48 if wheel_rotation > 0 else 48
-            self.circuit_scroll_x = self.clamp(
+            self.circuit_scroll_x = self._clamp(
                 self.circuit_scroll_x + step, 0, max_scroll_x
             )
             return True
 
         return False
 
-    def start_scope_scroll_drag(self, x_pos, y_pos):
+    def _start_scope_scroll_drag(self, x_pos, y_pos):
         """Start dragging a scope scrollbar thumb if one was clicked."""
         vertical_track = self.scope_geometry.get("vertical_track")
         vertical_thumb = self.scope_geometry.get("vertical_thumb")
         horizontal_track = self.scope_geometry.get("horizontal_track")
         horizontal_thumb = self.scope_geometry.get("horizontal_thumb")
 
-        if self.point_in_rect(x_pos, y_pos, vertical_thumb):
+        if self._point_in_rect(x_pos, y_pos, vertical_thumb):
             self.scope_drag_mode = "vertical"
             self.scope_drag_offset = y_pos - vertical_thumb[1]
             return True
 
-        if vertical_thumb and self.point_in_rect(x_pos, y_pos, vertical_track):
+        if vertical_thumb and self._point_in_rect(
+            x_pos, y_pos, vertical_track
+        ):
             self.scope_drag_mode = "vertical"
             self.scope_drag_offset = vertical_thumb[3] / 2
-            self.update_scope_scroll_drag(x_pos, y_pos)
+            self._update_scope_scroll_drag(x_pos, y_pos)
             self.Refresh()
             return True
 
-        if self.point_in_rect(x_pos, y_pos, horizontal_thumb):
+        if self._point_in_rect(x_pos, y_pos, horizontal_thumb):
             self.scope_drag_mode = "horizontal"
             self.scope_drag_offset = x_pos - horizontal_thumb[0]
             self.follow_latest_cycles = False
             return True
 
-        if horizontal_thumb and self.point_in_rect(
+        if horizontal_thumb and self._point_in_rect(
             x_pos, y_pos, horizontal_track
         ):
             self.scope_drag_mode = "horizontal"
             self.scope_drag_offset = horizontal_thumb[2] / 2
             self.follow_latest_cycles = False
-            self.update_scope_scroll_drag(x_pos, y_pos)
+            self._update_scope_scroll_drag(x_pos, y_pos)
             self.Refresh()
             return True
 
         return False
 
-    def update_scope_scroll_drag(self, x_pos, y_pos):
+    def _update_scope_scroll_drag(self, x_pos, y_pos):
         """Update the visible scope rows or cycles during a scrollbar drag."""
         if self.scope_drag_mode == "vertical":
             track = self.scope_geometry.get("vertical_track")
@@ -3191,7 +3269,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             _, track_y, _, track_height = track
             _, _, _, thumb_height = thumb
             usable = max(track_height - thumb_height, 1)
-            thumb_y = self.clamp(
+            thumb_y = self._clamp(
                 y_pos - self.scope_drag_offset, track_y, track_y + usable
             )
             fraction = 1 - ((thumb_y - track_y) / usable)
@@ -3208,26 +3286,26 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             track_x, _, track_width, _ = track
             _, _, thumb_width, _ = thumb
             usable = max(track_width - thumb_width, 1)
-            thumb_x = self.clamp(
+            thumb_x = self._clamp(
                 x_pos - self.scope_drag_offset, track_x, track_x + usable
             )
             fraction = (thumb_x - track_x) / usable
             self.scope_first_cycle = int(round(fraction * max_first_cycle))
 
-    def scroll_scope_rows(self, x_pos, y_pos, wheel_rotation):
+    def _scroll_scope_rows(self, x_pos, y_pos, wheel_rotation):
         """Scroll signal rows when the mouse wheel is over the scope."""
         plot = self.scope_geometry.get("plot")
         max_first_row = self.scope_geometry.get("max_first_row", 0)
-        if not self.point_in_rect(x_pos, y_pos, plot) or max_first_row == 0:
+        if not self._point_in_rect(x_pos, y_pos, plot) or max_first_row == 0:
             return False
 
         step = -1 if wheel_rotation > 0 else 1
-        self.scope_first_row = self.clamp(
+        self.scope_first_row = self._clamp(
             self.scope_first_row + step, 0, max_first_row
         )
         return True
 
-    def wheel_scope(self, x_pos, y_pos, wheel_rotation):
+    def _wheel_scope(self, x_pos, y_pos, wheel_rotation):
         """Zoom 2D scope signals vertically, or the time axis with Shift.
 
         Plain wheel changes how many monitor rows share the height so the
@@ -3236,17 +3314,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """
         if self.trace_display_3d:
             return False
-        if not self.point_in_rect(x_pos, y_pos,
-                                  self.scope_geometry.get("plot")):
+        if not self._point_in_rect(x_pos, y_pos,
+                                   self.scope_geometry.get("plot")):
             return False
         factor = 1.12 if wheel_rotation > 0 else 1.0 / 1.12
         if wx.GetKeyState(wx.WXK_SHIFT):
-            self.zoom_scope(factor)
+            self._zoom_scope(factor)
         else:
-            self.zoom_scope_rows(factor)
+            self._zoom_scope_rows(factor)
         return True
 
-    def point_in_rect(self, x_pos, y_pos, rect):
+    def _point_in_rect(self, x_pos: float, y_pos: float,
+                       rect: tuple | None) -> bool:
         """Return True if a point lies within an OpenGL rectangle."""
         if rect is None:
             return False
@@ -3257,15 +3336,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             and rect_y <= y_pos <= rect_y + rect_height
         )
 
-    def clamp(self, value, minimum, maximum):
+    def _clamp(self, value: float, minimum: float,
+               maximum: float) -> float:
         """Clamp a number between two bounds."""
         return max(minimum, min(value, maximum))
 
-    def render_text(self, text, x_pos, y_pos, colour=None):
+    def render_text(
+        self, text: str, x_pos: float, y_pos: float,
+        colour: tuple[float, float, float] | None = None,
+    ) -> None:
         """Draw bitmap text at the given position."""
         if colour is None:
-            colour = self.theme_colour("text")
-        self.set_colour(*colour)
+            colour = self._theme_colour("text")
+        self._set_colour(*colour)
         GL.glRasterPos2f(x_pos, y_pos)
         font = GLUT.GLUT_BITMAP_HELVETICA_12
 
@@ -3276,8 +3359,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             else:
                 GLUT.glutBitmapCharacter(font, ord(character))
 
-    def render_scaled_text(self, text, x_pos, y_pos, pixel_height,
-                           max_width=None, colour=None):
+    def _render_scaled_text(self, text, x_pos, y_pos, pixel_height,
+                            max_width=None, colour=None):
         """Draw vector text whose size scales with the current zoom.
 
         Unlike the bitmap labels, stroke text is real geometry, so circuit
@@ -3286,7 +3369,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """
         text = str(text)
         if colour is None:
-            colour = self.theme_colour("text")
+            colour = self._theme_colour("text")
         font = GLUT.GLUT_STROKE_ROMAN
         width_units = sum(
             GLUT.glutStrokeWidth(font, ord(character)) for character in text
@@ -3294,7 +3377,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         scale = pixel_height / 119.05
         if max_width is not None and width_units * scale > max_width:
             scale = max_width / width_units
-        self.set_colour(*colour)
+        self._set_colour(*colour)
         GL.glPushMatrix()
         GL.glTranslatef(x_pos, y_pos, 0.0)
         GL.glScalef(scale, scale, scale)
@@ -3304,19 +3387,94 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLineWidth(1.0)
         GL.glPopMatrix()
 
-    def set_colour(self, red, green, blue):
+    def _set_colour(self, red, green, blue):
         """Set the OpenGL drawing colour."""
         GL.glColor3f(red, green, blue)
 
 
 class Gui(wx.Frame):
-    """Configure the main GUI window and widgets."""
+    """Configure the main window and all the widgets.
 
-    def __init__(self, title, path, names, devices, network, monitors,
-                 initial_language=None):
+    This class provides a graphical user interface for the Logic
+    Simulator: it enables the user to run, continue, step, or auto-run
+    the simulation, change switch values, and add or remove monitors.
+    The File menu opens, saves, and exports definition files and view
+    images; the Settings menu selects the language, dark mode, and
+    colour-blind colours; the Help menu documents every control.
+
+    Parameters
+    ----------
+    title: title of the window.
+    path: path of the loaded circuit definition file.
+    names: instance of the names.Names class.
+    devices: instance of the devices.Devices class.
+    network: instance of the network.Network class.
+    monitors: instance of the monitors.Monitors class.
+    initial_language: optional startup language code, e.g. "en".
+
+    Public methods
+    --------------
+    t(self, key): Returns translated UI text for the current language.
+
+    on_menu(self, event): Handles File, Settings, and Help menu events.
+
+    on_close(self, event): Stops background timers before closing.
+
+    on_run_button(self, event): Runs the simulation from a cold start.
+
+    on_continue_button(self, event): Continues the simulation.
+
+    on_step_button(self, event): Runs exactly one simulation cycle.
+
+    on_auto_run_button(self, event): Starts or stops continuous running.
+
+    on_auto_timer(self, event): Advances one cycle per timer tick.
+
+    on_speed_slider(self, event): Updates the auto-run timer interval.
+
+    on_set_switch_button(self, event): Sets the selected switch value.
+
+    on_add_monitor_button(self, event): Adds the selected monitor.
+
+    on_remove_monitor_button(self, event): Removes the selected monitor.
+
+    on_reset_view_button(self, event): Resets the canvas views.
+
+    on_dark_mode_button(self): Toggles the light or dark theme.
+
+    on_colour_blind_button(self): Toggles colour-blind colours.
+
+    on_circuit_fit(self): Fits the whole circuit into its viewport.
+
+    on_scope_fit(self): Fits all traces into the oscilloscope.
+
+    on_trace_display_button(self, event): Toggles 2D or 3D traces.
+
+    on_circuit_3d_button(self, event): Toggles the 2D or 3D circuit.
+
+    on_maximise_circuit_button(self, event): Maximises the circuit.
+
+    on_maximise_scope_button(self, event): Maximises the oscilloscope.
+
+    on_open_file(self): Loads a new definition file via a dialog.
+
+    on_save_file(self): Saves a copy of the definition file.
+
+    on_export_circuit(self): Exports the circuit view to PNG/PDF.
+
+    on_export_scope(self): Exports the oscilloscope to PNG/PDF.
+
+    on_help(self): Displays a concise user guide.
+
+    on_about(self): Displays application information.
+    """
+
+    def __init__(self, title: str, path: str, names: Names,
+                 devices: Devices, network: Network, monitors: Monitors,
+                 initial_language: str | None = None) -> None:
         """Initialise widgets, controller, and layout."""
-        self.translations = self.build_translations()
-        self.language_names = self.build_language_names()
+        self.translations = self._build_translations()
+        self.language_names = self._build_language_names()
         if initial_language in self.translations:
             self.current_language = initial_language
         else:
@@ -3338,49 +3496,37 @@ class Gui(wx.Frame):
         self.default_monitor_traces = {}
         self.auto_timer = wx.Timer(self)
 
-        self.configure_menu()
+        self._configure_menu()
         self.CreateStatusBar()
         self.canvas = MyGLCanvas(self, devices, monitors, translator=self.t)
-        self.create_controls()
-        self.configure_layout()
-        self.bind_events()
-        self.apply_theme()
-        self.remember_default_monitors()
-        self.refresh_choices()
-        self.set_status(self.format_text("loaded_file", path=path))
+        self._create_controls()
+        self._configure_layout()
+        self._bind_events()
+        self._apply_theme()
+        self._remember_default_monitors()
+        self._refresh_choices()
+        self._set_status(self._format_text("loaded_file", path=path))
 
         min_canvas_width, min_canvas_height = self.canvas.minimum_visual_size()
         self.SetSizeHints(min_canvas_width + 420, min_canvas_height + 170)
 
-    def build_translations(self):
+    def _build_translations(self):
         """Return UI label translations keyed by language code."""
         return load_translations()
 
-    def build_language_names(self):
+    def _build_language_names(self):
         """Return display names for configured languages."""
         return load_language_names()
 
-    def t(self, key):
+    def t(self, key: str) -> str:
         """Translate a UI label for the current language."""
         return translate(self.translations, self.current_language, key)
 
-    def format_text(self, key, **values):
+    def _format_text(self, key: str, **values: object) -> str:
         """Translate a UI label and format named placeholders."""
         return self.t(key).format(**values)
 
-    def dark_mode_label(self):
-        """Return the mode toggle label for the current state."""
-        if self.dark_mode:
-            return self.t("light_mode")
-        return self.t("dark_mode")
-
-    def colour_blind_mode_label(self):
-        """Return the colour-mode toggle label for the current state."""
-        if self.colour_blind_mode:
-            return self.t("standard_colours")
-        return self.t("colour_blind_mode")
-
-    def gui_theme(self):
+    def _gui_theme(self):
         """Return wx colours for the current interface theme."""
         if self.dark_mode:
             return {
@@ -3400,9 +3546,9 @@ class Gui(wx.Frame):
             "log": wx.Colour(250, 251, 253),
         }
 
-    def apply_theme(self):
+    def _apply_theme(self):
         """Apply light or dark colours to wx controls and the canvas."""
-        theme = self.gui_theme()
+        theme = self._gui_theme()
         self.SetBackgroundColour(theme["background"])
         self.side_panel.SetBackgroundColour(theme["background"])
         self.canvas.set_dark_mode(self.dark_mode)
@@ -3448,7 +3594,7 @@ class Gui(wx.Frame):
         self.Refresh()
         self.Layout()
 
-    def configure_menu(self):
+    def _configure_menu(self):
         """Create the File, Settings, and Help menus."""
         self.help_menu_id = wx.NewIdRef()
         self.export_circuit_menu_id = wx.NewIdRef()
@@ -3507,7 +3653,7 @@ class Gui(wx.Frame):
         self.menu_bar.Append(self.help_menu, self.t("menu_help"))
         self.SetMenuBar(self.menu_bar)
 
-    def create_controls(self):
+    def _create_controls(self):
         """Create all sidebar controls."""
         self.cycles_label = wx.StaticText(self, wx.ID_ANY, self.t("cycles"))
         self.cycles_spin = wx.SpinCtrl(
@@ -3604,7 +3750,7 @@ class Gui(wx.Frame):
             self, wx.ID_ANY, self.t("maximise_scope")
         )
 
-    def configure_layout(self):
+    def _configure_layout(self):
         """Arrange canvas and controls in sizers."""
         root_sizer = wx.BoxSizer(wx.VERTICAL)
         run_toolbar_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -3626,8 +3772,8 @@ class Gui(wx.Frame):
             self.side_panel, label=self.t("readings")
         )
         self.log_box = wx.StaticBox(self.side_panel, label=self.t("log"))
-        self.reparent_side_panel_controls()
-        self.match_control_widths(
+        self._reparent_side_panel_controls()
+        self._match_control_widths(
             [self.add_monitor_button, self.remove_monitor_button]
         )
         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
@@ -3718,7 +3864,7 @@ class Gui(wx.Frame):
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
         self.SetSizer(root_sizer)
 
-    def match_control_widths(self, controls):
+    def _match_control_widths(self, controls):
         """Give related controls one shared width so rows line up."""
         for control in controls:
             control.SetMinSize((-1, -1))
@@ -3726,7 +3872,7 @@ class Gui(wx.Frame):
         for control in controls:
             control.SetMinSize((width, -1))
 
-    def reparent_side_panel_controls(self):
+    def _reparent_side_panel_controls(self):
         """Make side-panel widgets children of their native group boxes."""
         for control in [
             self.switch_choice, self.switch_value,
@@ -3754,7 +3900,7 @@ class Gui(wx.Frame):
         self.readings_list.Reparent(self.readings_box)
         self.log_text.Reparent(self.log_box)
 
-    def bind_events(self):
+    def _bind_events(self):
         """Bind widget events to handlers."""
         self.Bind(wx.EVT_MENU, self.on_menu)
         self.Bind(wx.EVT_TIMER, self.on_auto_timer, self.auto_timer)
@@ -3790,51 +3936,51 @@ class Gui(wx.Frame):
             wx.EVT_TOGGLEBUTTON, self.on_maximise_scope_button
         )
 
-    def on_circuit_fit(self):
+    def on_circuit_fit(self) -> None:
         """Fit the whole circuit overview into the viewport."""
         self.canvas.fit_circuit()
-        self.set_status(self.t("circuit_overview_fitted"))
+        self._set_status(self.t("circuit_overview_fitted"))
 
-    def on_scope_fit(self):
+    def on_scope_fit(self) -> None:
         """Fit every monitor row and cycle into the oscilloscope."""
         self.canvas.fit_scope()
-        self.set_status(self.t("scope_fitted"))
+        self._set_status(self.t("scope_fitted"))
 
-    def on_trace_display_button(self, event):
+    def on_trace_display_button(self, event: wx.CommandEvent) -> None:
         """Switch between the 2D and 3D signal trace displays."""
         enabled = self.trace_display_button.GetValue()
         self.canvas.set_trace_display_3d(enabled)
         if enabled:
-            self.set_status(self.t("trace_display_3d_enabled"))
+            self._set_status(self.t("trace_display_3d_enabled"))
         else:
-            self.set_status(self.t("trace_display_2d_enabled"))
+            self._set_status(self.t("trace_display_2d_enabled"))
 
-    def on_circuit_3d_button(self, event):
+    def on_circuit_3d_button(self, event: wx.CommandEvent) -> None:
         """Switch the circuit overview between 2D and 3D."""
         enabled = self.circuit_3d_button.GetValue()
         self.canvas.set_circuit_display_3d(enabled)
         if enabled:
-            self.set_status(self.t("circuit_3d_enabled"))
+            self._set_status(self.t("circuit_3d_enabled"))
         else:
-            self.set_status(self.t("circuit_3d_disabled"))
+            self._set_status(self.t("circuit_3d_disabled"))
 
-    def on_maximise_circuit_button(self, event):
+    def on_maximise_circuit_button(self, event: wx.CommandEvent) -> None:
         """Maximise the circuit overview, or restore the split view."""
         if self.maximise_circuit_button.GetValue():
             self.maximise_scope_button.SetValue(False)
-            self.apply_view_mode("circuit")
+            self._apply_view_mode("circuit")
         else:
-            self.apply_view_mode("split")
+            self._apply_view_mode("split")
 
-    def on_maximise_scope_button(self, event):
+    def on_maximise_scope_button(self, event: wx.CommandEvent) -> None:
         """Maximise the oscilloscope, or restore the split view."""
         if self.maximise_scope_button.GetValue():
             self.maximise_circuit_button.SetValue(False)
-            self.apply_view_mode("scope")
+            self._apply_view_mode("scope")
         else:
-            self.apply_view_mode("split")
+            self._apply_view_mode("split")
 
-    def apply_view_mode(self, mode):
+    def _apply_view_mode(self, mode):
         """Switch the canvas layout and report the active view."""
         self.maximise_circuit_button.SetValue(mode == "circuit")
         self.maximise_scope_button.SetValue(mode == "scope")
@@ -3844,34 +3990,34 @@ class Gui(wx.Frame):
             "circuit": "view_mode_circuit",
             "scope": "view_mode_scope",
         }
-        self.set_status(self.t(messages[mode]))
+        self._set_status(self.t(messages[mode]))
 
-    def on_menu(self, event):
+    def on_menu(self, event: wx.CommandEvent) -> None:
         """Handle menu events."""
         event_id = event.GetId()
         if event_id == wx.ID_EXIT:
-            self.stop_auto_run()
+            self._stop_auto_run()
             self.Close(True)
         elif event_id == wx.ID_OPEN:
-            self.defer_menu_action(self.on_open_file)
+            self._defer_menu_action(self.on_open_file)
         elif event_id == wx.ID_SAVEAS:
-            self.defer_menu_action(self.on_save_file)
+            self._defer_menu_action(self.on_save_file)
         elif event_id == int(self.export_circuit_menu_id):
-            self.defer_menu_action(self.on_export_circuit)
+            self._defer_menu_action(self.on_export_circuit)
         elif event_id == int(self.export_scope_menu_id):
-            self.defer_menu_action(self.on_export_scope)
+            self._defer_menu_action(self.on_export_scope)
         elif event_id == int(self.help_menu_id):
-            self.defer_menu_action(self.on_help)
+            self._defer_menu_action(self.on_help)
         elif event_id == wx.ID_ABOUT:
-            self.defer_menu_action(self.on_about)
+            self._defer_menu_action(self.on_about)
         elif event_id == self.dark_mode_menu_item.GetId():
             self.on_dark_mode_button()
         elif event_id == self.colour_blind_menu_item.GetId():
             self.on_colour_blind_button()
         elif event_id in self.language_menu_codes:
-            self.set_language(self.language_menu_codes[event_id])
+            self._set_language(self.language_menu_codes[event_id])
 
-    def defer_menu_action(self, action):
+    def _defer_menu_action(self, action):
         """Run a dialog-opening menu action after the menu fully closes.
 
         Opening a dialog straight from the menu event races the menu
@@ -3881,7 +4027,7 @@ class Gui(wx.Frame):
         """
         wx.CallLater(120, action)
 
-    def show_dialog_raised(self, dialog):
+    def _show_dialog_raised(self, dialog):
         """Show a modal dialog and keep it in front of the main frame.
 
         On WSLg desktops a freshly opened dialog can stack behind the
@@ -3890,10 +4036,10 @@ class Gui(wx.Frame):
         stealing, so apply it before showing; the raise timers (which
         fire inside the modal loop) remain as a fallback.
         """
-        self.keep_dialog_above(dialog)
+        self._keep_dialog_above(dialog)
         raisers = [
-            wx.CallLater(250, self.raise_window, dialog),
-            wx.CallLater(700, self.raise_window, dialog),
+            wx.CallLater(250, self._raise_window, dialog),
+            wx.CallLater(700, self._raise_window, dialog),
         ]
         try:
             return dialog.ShowModal()
@@ -3901,7 +4047,7 @@ class Gui(wx.Frame):
             for raiser in raisers:
                 raiser.Stop()
 
-    def keep_dialog_above(self, dialog):
+    def _keep_dialog_above(self, dialog):
         """Ask the window manager to keep a dialog above other windows.
 
         WSLg translates the keep-above hint into a Windows topmost flag,
@@ -3916,7 +4062,7 @@ class Gui(wx.Frame):
             dialog.GetWindowStyleFlag() | wx.STAY_ON_TOP
         )
 
-    def raise_window(self, window):
+    def _raise_window(self, window):
         """Bring a window to the front if it still exists.
 
         Re-applies the keep-above hint first: the generic message
@@ -3925,10 +4071,10 @@ class Gui(wx.Frame):
         this timer fires the window exists and the change sticks.
         """
         if window:
-            self.keep_dialog_above(window)
+            self._keep_dialog_above(window)
             window.Raise()
 
-    def show_message_raised(self, message, caption, style):
+    def _show_message_raised(self, message, caption, style):
         """Show a message dialog that recovers from stacking races.
 
         The generic (wx-drawn) message dialog is used because the native
@@ -3936,9 +4082,9 @@ class Gui(wx.Frame):
         keep-above hint that stops WSLg hiding it behind the frame.
         """
         with wx.GenericMessageDialog(self, message, caption, style) as dlg:
-            self.show_dialog_raised(dlg)
+            self._show_dialog_raised(dlg)
 
-    def set_language(self, language_code):
+    def _set_language(self, language_code):
         """Switch visible GUI labels to the selected language."""
         if language_code not in self.translations:
             return
@@ -3948,30 +4094,30 @@ class Gui(wx.Frame):
             if code == language_code:
                 self.language_menu.Check(item_id, True)
         self.canvas.set_translator(self.t)
-        self.update_language_labels()
-        self.set_status(self.t("language_changed"))
+        self._update_language_labels()
+        self._set_status(self.t("language_changed"))
 
     def on_dark_mode_button(self):
         """Toggle between light and dark interface themes."""
         self.dark_mode = not self.dark_mode
         self.dark_mode_menu_item.Check(self.dark_mode)
-        self.apply_theme()
+        self._apply_theme()
         if self.dark_mode:
-            self.set_status(self.t("dark_mode_enabled"))
+            self._set_status(self.t("dark_mode_enabled"))
         else:
-            self.set_status(self.t("light_mode_enabled"))
+            self._set_status(self.t("light_mode_enabled"))
 
     def on_colour_blind_button(self):
         """Toggle colour-blind-safe signal colours."""
         self.colour_blind_mode = not self.colour_blind_mode
         self.colour_blind_menu_item.Check(self.colour_blind_mode)
-        self.apply_theme()
+        self._apply_theme()
         if self.colour_blind_mode:
-            self.set_status(self.t("colour_blind_enabled"))
+            self._set_status(self.t("colour_blind_enabled"))
         else:
-            self.set_status(self.t("colour_blind_disabled"))
+            self._set_status(self.t("colour_blind_disabled"))
 
-    def update_language_labels(self):
+    def _update_language_labels(self):
         """Apply the current language to visible menus and controls."""
         self.SetTitle(self.t("window_title"))
         self.menu_bar.SetMenuLabel(0, self.t("menu_file"))
@@ -4022,122 +4168,122 @@ class Gui(wx.Frame):
         self.maximise_label.SetLabel(self.t("maximise"))
         self.maximise_circuit_button.SetLabel(self.t("maximise_circuit"))
         self.maximise_scope_button.SetLabel(self.t("maximise_scope"))
-        self.match_control_widths(
+        self._match_control_widths(
             [self.add_monitor_button, self.remove_monitor_button]
         )
         self.canvas.set_translator(self.t)
-        self.apply_theme()
+        self._apply_theme()
         self.Layout()
 
-    def on_close(self, event):
+    def on_close(self, event: wx.CloseEvent) -> None:
         """Stop background timers before closing the window."""
-        self.stop_auto_run()
+        self._stop_auto_run()
         event.Skip()
 
-    def on_run_button(self, event):
+    def on_run_button(self, event: wx.CommandEvent) -> None:
         """Run the simulation from a cold start."""
-        self.stop_auto_run()
-        self.clear_removed_default_traces()
+        self._stop_auto_run()
+        self._clear_removed_default_traces()
         self.canvas.follow_latest_cycles = True
         success, message = self.controller.run_from_start(
             self.cycles_spin.GetValue()
         )
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_continue_button(self, event):
+    def on_continue_button(self, event: wx.CommandEvent) -> None:
         """Continue a previous simulation."""
-        self.stop_auto_run()
+        self._stop_auto_run()
         self.canvas.follow_latest_cycles = True
         success, message = self.controller.continue_simulation(
             self.cycles_spin.GetValue()
         )
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_step_button(self, event):
+    def on_step_button(self, event: wx.CommandEvent) -> None:
         """Run exactly one simulation cycle."""
-        self.stop_auto_run()
+        self._stop_auto_run()
         success, message = self.controller.step_simulation()
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_auto_run_button(self, event):
+    def on_auto_run_button(self, event: wx.CommandEvent) -> None:
         """Start or stop continuous simulation."""
         if self.auto_run_button.GetValue():
             self.canvas.follow_latest_cycles = True
-            self.auto_timer.Start(self.get_auto_delay())
-            self.set_status(self.t("auto_run_started"))
+            self.auto_timer.Start(self._get_auto_delay())
+            self._set_status(self.t("auto_run_started"))
         else:
-            self.stop_auto_run()
-            self.set_status(self.t("auto_run_stopped"))
+            self._stop_auto_run()
+            self._set_status(self.t("auto_run_stopped"))
 
-    def on_auto_timer(self, event):
+    def on_auto_timer(self, event: wx.TimerEvent) -> None:
         """Advance one cycle whenever the auto-run timer fires."""
         success, message = self.controller.step_simulation()
-        self.refresh_choices()
+        self._refresh_choices()
         self.canvas.Refresh()
         if success:
-            self.set_status(message)
+            self._set_status(message)
         else:
-            self.stop_auto_run()
-            self.set_status(message, error=True)
+            self._stop_auto_run()
+            self._set_status(message, error=True)
 
-    def on_speed_slider(self, event):
+    def on_speed_slider(self, event: wx.CommandEvent) -> None:
         """Update the auto-run timer interval."""
         if self.auto_timer.IsRunning():
-            self.auto_timer.Start(self.get_auto_delay())
+            self.auto_timer.Start(self._get_auto_delay())
 
-    def get_auto_delay(self):
+    def _get_auto_delay(self):
         """Return timer delay in milliseconds from the speed slider."""
         speed = self.speed_slider.GetValue()
         return max(50, 1050 - speed * 100)
 
-    def stop_auto_run(self):
+    def _stop_auto_run(self):
         """Stop continuous running if it is active."""
         if self.auto_timer.IsRunning():
             self.auto_timer.Stop()
         if self.auto_run_button.GetValue():
             self.auto_run_button.SetValue(False)
 
-    def on_set_switch_button(self, event):
+    def on_set_switch_button(self, event: wx.CommandEvent) -> None:
         """Set the selected switch to the selected value."""
-        switch_name = self.get_choice_value(self.switch_choice)
+        switch_name = self._get_choice_value(self.switch_choice)
         if switch_name is None:
-            self.after_action(False, self.t("no_switch_selected"))
+            self._after_action(False, self.t("no_switch_selected"))
             return
 
         success, message = self.controller.set_switch(
             switch_name, self.switch_value.GetStringSelection()
         )
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_add_monitor_button(self, event):
+    def on_add_monitor_button(self, event: wx.CommandEvent) -> None:
         """Add the selected signal as a monitor."""
-        signal_name = self.get_choice_value(self.add_monitor_choice)
+        signal_name = self._get_choice_value(self.add_monitor_choice)
         if signal_name is None:
-            self.after_action(False, self.t("no_available_signal_selected"))
+            self._after_action(False, self.t("no_available_signal_selected"))
             return
 
         success, message = self.controller.add_monitor(signal_name)
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_remove_monitor_button(self, event):
+    def on_remove_monitor_button(self, event: wx.CommandEvent) -> None:
         """Remove the selected monitor."""
-        signal_name = self.get_choice_value(self.remove_monitor_choice)
+        signal_name = self._get_choice_value(self.remove_monitor_choice)
         if signal_name is None:
-            self.after_action(False, self.t("no_current_monitor_selected"))
+            self._after_action(False, self.t("no_current_monitor_selected"))
             return
 
-        self.archive_default_monitor(signal_name)
+        self._archive_default_monitor(signal_name)
         success, message = self.controller.remove_monitor(signal_name)
-        self.after_action(success, message)
+        self._after_action(success, message)
 
-    def on_reset_view_button(self, event):
+    def on_reset_view_button(self, event: wx.CommandEvent) -> None:
         """Restore the default monitor view and reset canvas pan and zoom."""
-        self.restore_default_monitors()
-        self.refresh_choices()
+        self._restore_default_monitors()
+        self._refresh_choices()
         self.canvas.reset_view()
-        self.set_status(self.t("view_reset"))
+        self._set_status(self.t("view_reset"))
 
-    def on_open_file(self):
+    def on_open_file(self) -> None:
         """Load and parse a new definition file selected by the user."""
         with wx.FileDialog(
             self,
@@ -4145,13 +4291,13 @@ class Gui(wx.Frame):
             wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as dialog:
-            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
+            if self._show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return
             path = dialog.GetPath()
 
-        self.load_definition_file(path)
+        self._load_definition_file(path)
 
-    def on_save_file(self):
+    def on_save_file(self) -> None:
         """Save a copy of the currently loaded definition file."""
         default_dir = os.path.dirname(self.path)
         default_file = os.path.basename(self.path)
@@ -4164,27 +4310,27 @@ class Gui(wx.Frame):
             wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
-            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
+            if self._show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return
             save_path = dialog.GetPath()
 
         try:
             if os.path.abspath(save_path) != os.path.abspath(self.path):
                 shutil.copyfile(self.path, save_path)
-            self.set_status(self.format_text("saved_file", path=save_path))
+            self._set_status(self._format_text("saved_file", path=save_path))
         except OSError as error:
-            self.show_message_raised(
-                self.format_text("file_save_error_body", error=error),
+            self._show_message_raised(
+                self._format_text("file_save_error_body", error=error),
                 self.t("file_save_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status(self.t("file_save_failed"), error=True)
+            self._set_status(self.t("file_save_failed"), error=True)
 
-    def on_export_circuit(self):
+    def on_export_circuit(self) -> None:
         """Export the current circuit overview to an image or PDF."""
         default_dir = os.path.dirname(self.path)
         base_name = os.path.splitext(os.path.basename(self.path))[0]
-        export_path = self.choose_export_path(
+        export_path = self._choose_export_path(
             self.t("export_circuit_dialog_title"),
             default_dir,
             base_name + "_circuit.png",
@@ -4194,24 +4340,24 @@ class Gui(wx.Frame):
 
         try:
             if self.canvas.save_circuit_image(export_path):
-                self.set_status(
-                    self.format_text("exported_circuit", path=export_path)
+                self._set_status(
+                    self._format_text("exported_circuit", path=export_path)
                 )
             else:
-                self.set_status(self.t("export_circuit_failed"), error=True)
+                self._set_status(self.t("export_circuit_failed"), error=True)
         except Exception as error:
-            self.show_message_raised(
-                self.format_text("circuit_export_error_body", error=error),
+            self._show_message_raised(
+                self._format_text("circuit_export_error_body", error=error),
                 self.t("circuit_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status(self.t("export_circuit_failed"), error=True)
+            self._set_status(self.t("export_circuit_failed"), error=True)
 
-    def on_export_scope(self):
+    def on_export_scope(self) -> None:
         """Export the current oscilloscope view to an image or PDF."""
         default_dir = os.path.dirname(self.path)
         base_name = os.path.splitext(os.path.basename(self.path))[0]
-        export_path = self.choose_export_path(
+        export_path = self._choose_export_path(
             self.t("export_scope_dialog_title"),
             default_dir,
             base_name + "_oscilloscope.png",
@@ -4221,20 +4367,20 @@ class Gui(wx.Frame):
 
         try:
             if self.canvas.save_scope_image(export_path):
-                self.set_status(
-                    self.format_text("exported_scope", path=export_path)
+                self._set_status(
+                    self._format_text("exported_scope", path=export_path)
                 )
             else:
-                self.set_status(self.t("export_scope_failed"), error=True)
+                self._set_status(self.t("export_scope_failed"), error=True)
         except Exception as error:
-            self.show_message_raised(
-                self.format_text("scope_export_error_body", error=error),
+            self._show_message_raised(
+                self._format_text("scope_export_error_body", error=error),
                 self.t("scope_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
             )
-            self.set_status(self.t("export_scope_failed"), error=True)
+            self._set_status(self.t("export_scope_failed"), error=True)
 
-    def choose_export_path(self, title, default_dir, default_file):
+    def _choose_export_path(self, title, default_dir, default_file):
         """Return a PNG or PDF path selected by the user."""
         with wx.FileDialog(
             self,
@@ -4244,7 +4390,7 @@ class Gui(wx.Frame):
             wildcard=self.t("export_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
-            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
+            if self._show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return None
             export_path = dialog.GetPath()
             filter_index = dialog.GetFilterIndex()
@@ -4259,9 +4405,9 @@ class Gui(wx.Frame):
 
         return export_path
 
-    def load_definition_file(self, path):
+    def _load_definition_file(self, path):
         """Replace the current simulator state with a parsed file."""
-        self.stop_auto_run()
+        self._stop_auto_run()
         names = Names()
         devices = Devices(names)
         network = Network(names, devices)
@@ -4279,55 +4425,55 @@ class Gui(wx.Frame):
         self.canvas.devices = devices
         self.canvas.monitors = monitors
         self.canvas.reset_view()
-        self.remember_default_monitors()
-        self.refresh_choices()
-        self.set_status(self.format_text("loaded_file", path=path))
+        self._remember_default_monitors()
+        self._refresh_choices()
+        self._set_status(self._format_text("loaded_file", path=path))
 
-    def on_help(self):
+    def on_help(self) -> None:
         """Display a concise user guide."""
-        self.show_message_raised(
+        self._show_message_raised(
             self.t("help_text"),
             self.t("help_title"),
             wx.OK | wx.ICON_INFORMATION,
         )
 
-    def on_about(self):
+    def on_about(self) -> None:
         """Display application information."""
-        self.show_message_raised(
+        self._show_message_raised(
             self.t("about_text"),
             self.t("about_title"),
             wx.OK | wx.ICON_INFORMATION,
         )
 
-    def after_action(self, success, message):
+    def _after_action(self, success, message):
         """Refresh state after a user action."""
-        self.refresh_choices()
+        self._refresh_choices()
         self.canvas.Refresh()
-        self.set_status(message, error=not success)
+        self._set_status(message, error=not success)
 
-    def refresh_choices(self):
+    def _refresh_choices(self):
         """Refresh switch, monitor, and reading controls."""
-        self.populate_choice(
+        self._populate_choice(
             self.switch_choice, self.controller.list_switches()
         )
-        self.populate_choice(
+        self._populate_choice(
             self.add_monitor_choice,
             self.controller.list_unmonitored_signals(),
         )
-        self.populate_choice(
+        self._populate_choice(
             self.remove_monitor_choice,
             self.controller.list_monitored_signals(),
         )
-        self.refresh_readings()
+        self._refresh_readings()
 
-    def refresh_readings(self):
+    def _refresh_readings(self):
         """Refresh the live device output readings list."""
         self.readings_list.Clear()
         readings = self.controller.list_device_readings()
         if readings:
             self.readings_list.AppendItems(readings)
 
-    def populate_choice(self, choice, values):
+    def _populate_choice(self, choice, values):
         """Populate a wx.Choice while preserving selection where possible."""
         old_selection = choice.GetStringSelection()
         choice.Clear()
@@ -4338,14 +4484,14 @@ class Gui(wx.Frame):
             else:
                 choice.SetSelection(0)
 
-    def get_choice_value(self, choice):
+    def _get_choice_value(self, choice):
         """Return the selected choice string, or None."""
         selection = choice.GetStringSelection()
         if selection == "":
             return None
         return selection
 
-    def remember_default_monitors(self):
+    def _remember_default_monitors(self):
         """Remember the monitor points that were present when a file loaded."""
         monitor_items = self.controller.monitors.monitors_dictionary.items()
         self.default_monitor_keys = [key for key, _ in monitor_items]
@@ -4353,7 +4499,7 @@ class Gui(wx.Frame):
             key: list(trace) for key, trace in monitor_items
         }
 
-    def archive_default_monitor(self, signal_name):
+    def _archive_default_monitor(self, signal_name):
         """Keep a removable default monitor trace available for Reset View."""
         signal_ids = self.controller.get_existing_signal_ids(signal_name)
         if signal_ids not in self.default_monitor_keys:
@@ -4363,7 +4509,7 @@ class Gui(wx.Frame):
         if signal_ids in traces:
             self.default_monitor_traces[signal_ids] = list(traces[signal_ids])
 
-    def restore_default_monitors(self):
+    def _restore_default_monitors(self):
         """Restore the monitor set that was present when the file loaded."""
         if not self.default_monitor_keys:
             return
@@ -4390,14 +4536,14 @@ class Gui(wx.Frame):
 
         self.default_monitor_traces = dict(restored_traces)
 
-    def clear_removed_default_traces(self):
+    def _clear_removed_default_traces(self):
         """Clear archived traces for monitors absent before a new run."""
         traces = self.controller.monitors.monitors_dictionary
         for key in self.default_monitor_keys:
             if key not in traces:
                 self.default_monitor_traces[key] = []
 
-    def set_status(self, message, error=False):
+    def _set_status(self, message, error=False):
         """Show a status message to the user."""
         prefix = self.t("error_prefix") + ": " if error else ""
         status_text = (
@@ -4408,9 +4554,9 @@ class Gui(wx.Frame):
             self.t("status_prefix") + ": "
             + status_text.replace("\n", "  |  ")
         )
-        self.append_log(prefix + message)
+        self._append_log(prefix + message)
 
-    def append_log(self, message):
+    def _append_log(self, message):
         """Append one message to the scrolling simulator log."""
         if not hasattr(self, "log_text"):
             return

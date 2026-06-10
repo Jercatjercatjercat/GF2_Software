@@ -209,19 +209,19 @@ def test_initial_scope_uses_waveform_layout_before_first_run():
     calls = {}
     rendered_text = []
 
-    canvas.draw_rectangle = lambda *args: None
-    canvas.draw_scope_header = lambda *args: None
+    canvas._draw_rectangle = lambda *args: None
+    canvas._draw_scope_header = lambda *args: None
     canvas.render_text = lambda *args: rendered_text.append(args)
-    canvas.draw_scope_grid = lambda *args: calls.setdefault("grid", args)
-    canvas.draw_scope_scrollbars = (
+    canvas._draw_scope_grid = lambda *args: calls.setdefault("grid", args)
+    canvas._draw_scope_scrollbars = (
         lambda *args: calls.setdefault("scrollbars", args)
     )
-    canvas.draw_empty_scope_rows = (
+    canvas._draw_empty_scope_rows = (
         lambda *args: calls.setdefault("empty_rows", args)
     )
-    canvas.draw_scope_axis = lambda *args: calls.setdefault("axis", args)
+    canvas._draw_scope_axis = lambda *args: calls.setdefault("axis", args)
 
-    canvas.draw_oscilloscope((0, 0, 800, 360), monitor_items)
+    canvas._draw_oscilloscope((0, 0, 800, 360), monitor_items)
 
     assert any("Press Run" in text[0] for text in rendered_text)
     assert calls["grid"][4] == 10
@@ -247,19 +247,19 @@ def test_initial_scope_respects_vertical_scroll_for_many_monitors():
     monitor_items = [((index, None), []) for index in range(12)]
     calls = {}
 
-    canvas.draw_rectangle = lambda *args: None
-    canvas.draw_scope_header = lambda *args: None
+    canvas._draw_rectangle = lambda *args: None
+    canvas._draw_scope_header = lambda *args: None
     canvas.render_text = lambda *args: None
-    canvas.draw_scope_grid = lambda *args: None
-    canvas.draw_scope_scrollbars = (
+    canvas._draw_scope_grid = lambda *args: None
+    canvas._draw_scope_scrollbars = (
         lambda *args: calls.setdefault("scrollbars", args)
     )
-    canvas.draw_empty_scope_rows = (
+    canvas._draw_empty_scope_rows = (
         lambda *args: calls.setdefault("empty_rows", args)
     )
-    canvas.draw_scope_axis = lambda *args: None
+    canvas._draw_scope_axis = lambda *args: None
 
-    canvas.draw_oscilloscope((0, 0, 640, 260), monitor_items)
+    canvas._draw_oscilloscope((0, 0, 640, 260), monitor_items)
 
     visible_items = calls["empty_rows"][4]
     assert visible_items == monitor_items[3:6]
@@ -285,14 +285,14 @@ def test_empty_scope_rows_draw_blank_aligned_traces():
         colour_indexes.append(index)
         return (index, 0, 0)
 
-    canvas.trace_colour_for_monitor = trace_colour
+    canvas._trace_colour_for_monitor = trace_colour
     canvas.render_text = lambda text, *args: labels.append(text)
-    canvas.draw_signal_level_scale = (
+    canvas._draw_signal_level_scale = (
         lambda *args: level_rows.append(args)
     )
-    canvas.draw_digital_signal = lambda *args: traces.append(args)
+    canvas._draw_digital_signal = lambda *args: traces.append(args)
 
-    canvas.draw_empty_scope_rows(
+    canvas._draw_empty_scope_rows(
         10, 100, 20, 120, monitor_items, 5, first_row=4
     )
 
@@ -314,15 +314,15 @@ def test_signal_colour_index_is_stable_per_signal_identity():
     )
     canvas = make_canvas(devices)
 
-    index_a = canvas.signal_colour_index("A", None)
-    index_b = canvas.signal_colour_index("B", None)
-    index_c = canvas.signal_colour_index("C", None)
+    index_a = canvas._signal_colour_index("A", None)
+    index_b = canvas._signal_colour_index("B", None)
+    index_c = canvas._signal_colour_index("C", None)
 
     # Each signal gets a distinct index fixed by device declaration order.
     assert [index_a, index_b, index_c] == [0, 1, 2]
     # Querying again (e.g. after monitors change) returns the same indices.
-    assert canvas.signal_colour_index("B", None) == index_b
-    assert canvas.signal_colour_index("C", None) == index_c
+    assert canvas._signal_colour_index("B", None) == index_b
+    assert canvas._signal_colour_index("C", None) == index_c
 
 
 def test_trace_colour_for_monitor_handles_accessibility_modes():
@@ -335,16 +335,16 @@ def test_trace_colour_for_monitor_handles_accessibility_modes():
     )
     canvas = make_canvas(devices)
 
-    assert canvas.trace_colour_for_monitor("CLK", None, 0) == (
+    assert canvas._trace_colour_for_monitor("CLK", None, 0) == (
         0.20, 0.55, 0.25
     )
-    assert canvas.trace_colour_for_monitor("DFF", devices.QBAR_ID, 1) == (
+    assert canvas._trace_colour_for_monitor("DFF", devices.QBAR_ID, 1) == (
         0.48, 0.30, 0.68
     )
 
     canvas.colour_blind_mode = True
 
-    assert canvas.trace_colour_for_monitor("CLK", None, 4) == (
+    assert canvas._trace_colour_for_monitor("CLK", None, 4) == (
         canvas.colour_blind_trace_colours[1]
     )
 
@@ -354,14 +354,14 @@ def test_visible_signal_window_pads_short_3d_traces():
     devices = FakeDevices([fake_device("A")])
     canvas = make_canvas(devices)
 
-    window = canvas.visible_signal_window(
+    window = canvas._visible_signal_window(
         [devices.LOW, devices.HIGH], first_cycle=1, cycle_count=4
     )
 
     assert window == [
         devices.HIGH, devices.BLANK, devices.BLANK, devices.BLANK
     ]
-    assert canvas.visible_signal_window(
+    assert canvas._visible_signal_window(
         [devices.HIGH], 0, 3, use_blank=True
     ) == [devices.BLANK, devices.BLANK, devices.BLANK]
 
@@ -371,16 +371,16 @@ def test_signal_height_3d_maps_digital_levels():
     devices = FakeDevices([fake_device("A")])
     canvas = make_canvas(devices)
 
-    assert canvas.signal_height_3d(devices.HIGH) > (
-        canvas.signal_height_3d(devices.LOW)
+    assert canvas._signal_height_3d(devices.HIGH) > (
+        canvas._signal_height_3d(devices.LOW)
     )
-    assert canvas.signal_height_3d(devices.RISING) == (
-        canvas.signal_height_3d(devices.HIGH)
+    assert canvas._signal_height_3d(devices.RISING) == (
+        canvas._signal_height_3d(devices.HIGH)
     )
-    assert canvas.signal_height_3d(devices.FALLING) == (
-        canvas.signal_height_3d(devices.LOW)
+    assert canvas._signal_height_3d(devices.FALLING) == (
+        canvas._signal_height_3d(devices.LOW)
     )
-    assert canvas.signal_height_3d(devices.BLANK) is None
+    assert canvas._signal_height_3d(devices.BLANK) is None
 
 
 def test_trace_display_3d_toggle_refreshes_canvas():
@@ -410,7 +410,7 @@ def test_circuit_content_size_grows_only_for_complex_diagrams():
     )
     simple_canvas = make_canvas(simple_devices)
 
-    assert simple_canvas.circuit_content_size(500, 300) == (500, 300)
+    assert simple_canvas._circuit_content_size(500, 300) == (500, 300)
 
     crowded_device_list = [
         fake_device("SW_" + str(index)) for index in range(8)
@@ -430,7 +430,7 @@ def test_circuit_content_size_grows_only_for_complex_diagrams():
     )
     crowded_canvas = make_canvas(crowded_devices)
 
-    content_width, content_height = crowded_canvas.circuit_content_size(
+    content_width, content_height = crowded_canvas._circuit_content_size(
         300, 220
     )
 
@@ -497,7 +497,7 @@ def test_display_bounds_enforce_circuit_and_scope_minimum_regions():
     canvas.scope_gap = 8
 
     min_width, min_height = canvas.minimum_visual_size()
-    circuit_bounds, scope_bounds = canvas.calculate_display_bounds(
+    circuit_bounds, scope_bounds = canvas._calculate_display_bounds(
         SimpleNamespace(width=min_width, height=min_height)
     )
 
@@ -521,7 +521,7 @@ def test_display_bounds_never_exceed_actual_canvas_width():
     canvas.scope_gap = 8
 
     narrow_width = 600
-    circuit_bounds, scope_bounds = canvas.calculate_display_bounds(
+    circuit_bounds, scope_bounds = canvas._calculate_display_bounds(
         SimpleNamespace(width=narrow_width, height=760)
     )
 
@@ -535,11 +535,11 @@ def test_circuit_3d_wire_height_separates_and_stays_bounded():
     canvas = make_canvas(devices)
 
     # A single wire sits at the base height with nothing to clear.
-    assert canvas.circuit_3d_wire_height(0, 1) == canvas.circuit_3d_wire_base
-    assert canvas.circuit_3d_wire_top(0) == canvas.circuit_3d_wire_base
+    assert canvas._circuit_3d_wire_height(0, 1) == canvas.circuit_3d_wire_base
+    assert canvas._circuit_3d_wire_top(0) == canvas.circuit_3d_wire_base
 
     # A few wires spread to the upper gap clamp (14.0) so they read clearly.
-    assert canvas.circuit_3d_wire_height(1, 2) == (
+    assert canvas._circuit_3d_wire_height(1, 2) == (
         canvas.circuit_3d_wire_base + 14.0
     )
 
@@ -547,13 +547,13 @@ def test_circuit_3d_wire_height_separates_and_stays_bounded():
     # wire thickness (4.5), so wires that cross on the floor still pass over
     # one another rather than overlapping.
     count = 30
-    heights = [canvas.circuit_3d_wire_height(i, count) for i in range(count)]
+    heights = [canvas._circuit_3d_wire_height(i, count) for i in range(count)]
     gaps = [heights[i + 1] - heights[i] for i in range(count - 1)]
     assert heights == sorted(heights)
     assert len(set(heights)) == count
     assert min(gaps) == 4.5
     assert max(gaps) <= 14.0
-    assert canvas.circuit_3d_wire_top(count) == heights[-1]
+    assert canvas._circuit_3d_wire_top(count) == heights[-1]
 
 
 def test_circuit_3d_zoom_keeps_cursor_point_fixed():
@@ -573,7 +573,7 @@ def test_circuit_3d_zoom_keeps_cursor_point_fixed():
     cursor_y = view_y + 0.20 * view_height
     old_zoom = canvas.circuit_3d_zoom
 
-    canvas.zoom_circuit_3d_at(1.12, cursor_x, cursor_y)
+    canvas._zoom_circuit_3d_at(1.12, cursor_x, cursor_y)
 
     new_zoom = canvas.circuit_3d_zoom
     assert new_zoom > old_zoom
@@ -610,7 +610,7 @@ def test_circuit_3d_zoom_at_centre_leaves_pan_unchanged():
         "fov_y": 40.0,
     }
 
-    canvas.zoom_circuit_3d_at(1.12, 200, 150)
+    canvas._zoom_circuit_3d_at(1.12, 200, 150)
 
     assert canvas.circuit_3d_pan_x == 0.0
     assert canvas.circuit_3d_pan_y == 0.0
@@ -626,21 +626,21 @@ def test_set_circuit_3d_scroll_maps_fraction_to_pan():
     }
 
     # Vertical: fraction 0 frames the top, 1 the bottom, 0.5 the centre.
-    canvas.set_circuit_3d_scroll("vertical", 0.0)
+    canvas._set_circuit_3d_scroll("vertical", 0.0)
     assert canvas.circuit_3d_pan_y == -80.0
-    canvas.set_circuit_3d_scroll("vertical", 1.0)
+    canvas._set_circuit_3d_scroll("vertical", 1.0)
     assert canvas.circuit_3d_pan_y == 80.0
-    canvas.set_circuit_3d_scroll("vertical", 0.5)
+    canvas._set_circuit_3d_scroll("vertical", 0.5)
     assert canvas.circuit_3d_pan_y == 0.0
 
     # Horizontal: fraction 0 frames the left, 1 the right.
-    canvas.set_circuit_3d_scroll("horizontal", 0.0)
+    canvas._set_circuit_3d_scroll("horizontal", 0.0)
     assert canvas.circuit_3d_pan_x == 100.0
-    canvas.set_circuit_3d_scroll("horizontal", 1.0)
+    canvas._set_circuit_3d_scroll("horizontal", 1.0)
     assert canvas.circuit_3d_pan_x == -100.0
 
     # Out-of-range fractions are clamped, never flinging the camera away.
-    canvas.set_circuit_3d_scroll("vertical", 5.0)
+    canvas._set_circuit_3d_scroll("vertical", 5.0)
     assert canvas.circuit_3d_pan_y == 80.0
 
 
@@ -648,7 +648,7 @@ def test_circuit_3d_scrollbar_drag_pans_camera():
     """Test if dragging the 3D scrollbar thumb moves the camera pan."""
     devices = FakeDevices([fake_device("A")])
     canvas = make_canvas(devices)
-    canvas.draw_rectangle = lambda *args, **kwargs: None
+    canvas._draw_rectangle = lambda *args, **kwargs: None
     view_bounds = (10, 40, 400, 300)
     canvas.circuit_geometry = {
         "mode": "3d",
@@ -656,7 +656,7 @@ def test_circuit_3d_scrollbar_drag_pans_camera():
         "content_x": 600.0, "content_y": 500.0,
         "visible_x": 300.0, "visible_y": 250.0,
     }
-    canvas.draw_circuit_scrollbars_3d(view_bounds)
+    canvas._draw_circuit_scrollbars_3d(view_bounds)
 
     track = canvas.circuit_geometry["vertical_track"]
     thumb = canvas.circuit_geometry["vertical_thumb"]
@@ -666,10 +666,10 @@ def test_circuit_3d_scrollbar_drag_pans_camera():
     canvas.circuit_drag_offset = 0
 
     # Thumb dragged to the top of the track frames the top of the scene.
-    canvas.update_circuit_scroll_drag(track[0], track_y + usable)
+    canvas._update_circuit_scroll_drag(track[0], track_y + usable)
     assert canvas.circuit_3d_pan_y == -80.0
     # Thumb dragged to the bottom frames the bottom of the scene.
-    canvas.update_circuit_scroll_drag(track[0], track_y)
+    canvas._update_circuit_scroll_drag(track[0], track_y)
     assert canvas.circuit_3d_pan_y == 80.0
 
 
@@ -703,15 +703,15 @@ def test_axis_gizmo_axes_track_camera_rotation():
 
     # Identity camera: X right, Y up, Z toward the viewer (drawn last).
     axes = {label: (dx, dy, depth) for label, dx, dy, depth
-            in canvas.axis_gizmo_axes(0.0, 0.0)}
+            in canvas._axis_gizmo_axes(0.0, 0.0)}
     assert axes["X"][0] > 0.99 and abs(axes["X"][1]) < 1e-9
     assert axes["Y"][1] > 0.99 and abs(axes["Y"][0]) < 1e-9
     assert axes["Z"][2] > 0.99
-    assert canvas.axis_gizmo_axes(0.0, 0.0)[-1][0] == "Z"
+    assert canvas._axis_gizmo_axes(0.0, 0.0)[-1][0] == "Z"
 
     # Yaw the camera 90 degrees: X swings toward the viewer, Z to the left.
     axes = {label: (dx, dy, depth) for label, dx, dy, depth
-            in canvas.axis_gizmo_axes(0.0, -90.0)}
+            in canvas._axis_gizmo_axes(0.0, -90.0)}
     assert axes["X"][2] > 0.99
     assert axes["Z"][0] < -0.99
     # Y is unaffected by yaw alone.
@@ -732,7 +732,7 @@ def test_project_3d_trace_point_matches_camera_centre():
         "pan_y": 0.0,
     }
 
-    centre = canvas.project_3d_trace_point(0.0, 0.0, 0.0, camera)
+    centre = canvas._project_3d_trace_point(0.0, 0.0, 0.0, camera)
 
     assert centre is not None
     assert abs(centre[0] - (40 + 200)) < 1e-6
@@ -741,10 +741,10 @@ def test_project_3d_trace_point_matches_camera_centre():
     # A point on the +X axis lands right of centre under a level camera.
     camera["rotate_x"] = 0.0
     camera["rotate_y"] = 0.0
-    right = canvas.project_3d_trace_point(50.0, 0.0, 0.0, camera)
+    right = canvas._project_3d_trace_point(50.0, 0.0, 0.0, camera)
     assert right[0] > 240 and abs(right[1] - 180) < 1e-6
     # Points behind the camera are rejected rather than mirrored.
-    assert canvas.project_3d_trace_point(0.0, 0.0, 600.0, camera) is None
+    assert canvas._project_3d_trace_point(0.0, 0.0, 600.0, camera) is None
 
 
 def test_build_3d_scope_row_hits_supports_hover_picking():
@@ -762,7 +762,7 @@ def test_build_3d_scope_row_hits_supports_hover_picking():
         (("A", None), []), (("B", None), []), (("C", None), []),
     ]
 
-    rows = canvas.build_3d_scope_row_hits(
+    rows = canvas._build_3d_scope_row_hits(
         (0, 0, 480, 360), monitor_items, cycle_span=180.0, row_span=44.0,
         row_pitch=22.0, camera_distance=420.0, aspect=480 / 360
     )
@@ -772,9 +772,9 @@ def test_build_3d_scope_row_hits_supports_hover_picking():
     for row in rows:
         mid_x = (row["start"][0] + row["end"][0]) / 2
         mid_y = (row["start"][1] + row["end"][1]) / 2
-        assert canvas.pick_3d_scope_row(mid_x, mid_y) == row["name"]
+        assert canvas._pick_3d_scope_row(mid_x, mid_y) == row["name"]
     # Far from every row nothing is picked.
-    assert canvas.pick_3d_scope_row(-500.0, -500.0) is None
+    assert canvas._pick_3d_scope_row(-500.0, -500.0) is None
 
 
 def test_point_segment_distance_handles_interior_and_endpoints():
@@ -782,9 +782,417 @@ def test_point_segment_distance_handles_interior_and_endpoints():
     devices = FakeDevices([fake_device("A")])
     canvas = make_canvas(devices)
 
-    assert canvas.point_segment_distance(50, 10, 0, 10, 100, 10) == 0.0
-    assert canvas.point_segment_distance(50, 16, 0, 10, 100, 10) == 6.0
+    assert canvas._point_segment_distance(50, 10, 0, 10, 100, 10) == 0.0
+    assert canvas._point_segment_distance(50, 16, 0, 10, 100, 10) == 6.0
     # Beyond an endpoint the distance is measured to that endpoint.
-    assert canvas.point_segment_distance(103, 14, 0, 10, 100, 10) == 5.0
+    assert canvas._point_segment_distance(103, 14, 0, 10, 100, 10) == 5.0
     # Degenerate zero-length segments behave like a point.
-    assert canvas.point_segment_distance(3, 4, 0, 0, 0, 0) == 5.0
+    assert canvas._point_segment_distance(3, 4, 0, 0, 0, 0) == 5.0
+
+
+def make_monitors(monitor_dict=None):
+    """Create a minimal fake monitors object for canvas tests."""
+    return SimpleNamespace(monitors_dictionary=monitor_dict or {})
+
+
+def test_zoom_circuit_clamps_and_scales_scroll():
+    """Test if circuit zoom stays bounded and rescales the scroll."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    canvas.circuit_zoom = 1.0
+    canvas.circuit_scroll_x = 100
+    canvas.circuit_scroll_y = 50
+
+    canvas._zoom_circuit(2.0)
+
+    assert canvas.circuit_zoom == 2.0
+    # The scroll scales with the zoom so the view stays in place.
+    assert canvas.circuit_scroll_x == 200
+    assert canvas.circuit_scroll_y == 100
+
+    canvas._zoom_circuit(100.0)
+    assert canvas.circuit_zoom == 3.0
+    canvas._zoom_circuit(0.0001)
+    assert canvas.circuit_zoom == 0.1
+
+
+def test_zoom_circuit_at_keeps_cursor_point_fixed():
+    """Test if 2D circuit zoom pins the diagram point under the mouse."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    view = (20, 30, 400, 300)
+    canvas.circuit_geometry = {"view": view}
+    canvas.last_circuit_content = (1600, 1200)
+    canvas.circuit_zoom = 1.0
+    canvas.circuit_scroll_x = 300
+    canvas.circuit_scroll_y = 200
+    cursor_x, cursor_y = 220, 180
+
+    view_x, view_y, view_width, view_height = view
+    origin_x = view_x - canvas.circuit_scroll_x
+    origin_y = view_y + view_height - 1200 + canvas.circuit_scroll_y
+    base_x = (cursor_x - origin_x) / canvas.circuit_zoom
+    base_y = (cursor_y - origin_y) / canvas.circuit_zoom
+
+    canvas._zoom_circuit_at(1.25, cursor_x, cursor_y)
+
+    new_zoom = canvas.circuit_zoom
+    assert new_zoom == 1.25
+    origin_x = view_x - canvas.circuit_scroll_x
+    origin_y = (
+        view_y + view_height - 1200 * new_zoom + canvas.circuit_scroll_y
+    )
+    assert abs((cursor_x - origin_x) / new_zoom - base_x) < 1e-9
+    assert abs((cursor_y - origin_y) / new_zoom - base_y) < 1e-9
+
+
+def test_fit_circuit_packs_content_and_resets_scroll():
+    """Test if fitting the 2D circuit zooms out and recentres it."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    canvas.circuit_zoom = 2.5
+    canvas.circuit_scroll_x = 120
+    canvas.circuit_scroll_y = 60
+    canvas.last_circuit_view = (400, 300)
+    canvas.last_circuit_content = (1600, 600)
+
+    canvas.fit_circuit()
+
+    # The zoom fits the wider axis (400/1600) with a small margin.
+    assert abs(canvas.circuit_zoom - 0.25 * 0.97) < 1e-9
+    assert canvas.circuit_scroll_x == 0
+    assert canvas.circuit_scroll_y == 0
+
+    # In 3D mode the camera is reset instead of the 2D zoom.
+    canvas.circuit_display_3d = True
+    canvas.circuit_3d_zoom = 3.0
+    canvas.circuit_3d_pan_x = 50.0
+    canvas.fit_circuit()
+    assert canvas.circuit_3d_zoom == 1.0
+    assert canvas.circuit_3d_pan_x == 0.0
+
+
+def test_fit_scope_packs_all_rows_and_cycles():
+    """Test if fitting the scope shows every monitor row and cycle."""
+    devices = FakeDevices([fake_device("A"), fake_device("B")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    canvas.monitors = make_monitors({
+        ("A", None): [0, 1] * 50,
+        ("B", None): [1, 0] * 50,
+    })
+    canvas.last_scope_plot_width = 500
+    canvas.last_scope_plot_height = 60
+    canvas.scope_first_cycle = 40
+    canvas.scope_first_row = 1
+    canvas.follow_latest_cycles = True
+
+    canvas.fit_scope()
+
+    assert canvas.scope_first_cycle == 0
+    assert canvas.scope_first_row == 0
+    assert canvas.follow_latest_cycles is False
+    # 100 cycles in 500 px needs 5 px per cycle = zoom 5/28.
+    assert abs(canvas.scope_cycle_zoom - 5 / 28) < 1e-9
+    # The row zoom packs both rows into the 60 px plot.
+    assert canvas.scope_row_zoom == 60 / (34 * 2)
+
+
+def test_zoom_scope_clamps_and_stops_following():
+    """Test if scope zooming clamps and stops auto-following cycles."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    canvas.Refresh = lambda: None
+    canvas.scope_cycle_zoom = 1.0
+    canvas.follow_latest_cycles = True
+
+    canvas._zoom_scope(100.0)
+
+    assert canvas.scope_cycle_zoom == 4.0
+    assert canvas.follow_latest_cycles is False
+
+    canvas.scope_row_zoom = 1.0
+    canvas._zoom_scope_rows(0.0001)
+    assert canvas.scope_row_zoom == 0.2
+
+
+def test_scope_row_geometry_keeps_rows_readable():
+    """Test if scope row maths respects floors, caps, and counts."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    # Zoomed out, more rows fit; never more than exist.
+    canvas.scope_row_zoom = 1.0
+    assert canvas._scope_visible_rows(340, 20) == 10
+    canvas.scope_row_zoom = 0.2
+    assert canvas._scope_visible_rows(340, 20) == 20
+    assert canvas._scope_visible_rows(340, 3) == 3
+    assert canvas._scope_visible_rows(5, 20) == 1
+
+    # The row gap fills the plot but stays within readable bounds.
+    assert canvas._scope_row_gap(300, 10) == 30
+    assert canvas._scope_row_gap(300, 100) == canvas.min_row_band
+    assert canvas._scope_row_gap(300, 1) == 88.0
+    # The waveform half-height always fits inside the row band.
+    assert canvas._scope_row_amplitude(30) == 12.6
+    assert canvas._scope_row_amplitude(1) == 4.0
+    assert canvas._scope_row_amplitude(500) == canvas.high_offset
+
+
+def test_signal_y_maps_levels_and_rejects_blanks():
+    """Test if signal levels map to trace heights, blanks to None."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    assert canvas._signal_y(devices.HIGH, 90, 70) == 90
+    assert canvas._signal_y(devices.RISING, 90, 70) == 90
+    assert canvas._signal_y(devices.LOW, 90, 70) == 70
+    assert canvas._signal_y(devices.FALLING, 90, 70) == 70
+    assert canvas._signal_y(devices.BLANK, 90, 70) is None
+
+
+def test_calculate_device_layers_orders_by_dependency():
+    """Test if devices are layered by input dependency depth."""
+    source = fake_device("A")
+    middle = fake_device("B", inputs={"I1": ("A", None)})
+    sink = fake_device("C", inputs={"I1": ("B", None)})
+    devices = FakeDevices([sink, source, middle])
+    canvas = make_canvas(devices)
+
+    layers = canvas._calculate_device_layers()
+
+    assert layers == {"A": 0, "B": 1, "C": 2}
+
+
+def test_calculate_device_layers_handles_feedback_loops():
+    """Test if mutually dependent devices settle on a default layer."""
+    first = fake_device("D", inputs={"I1": ("E", None)})
+    second = fake_device("E", inputs={"I1": ("D", None)})
+    devices = FakeDevices([first, second])
+    canvas = make_canvas(devices)
+
+    layers = canvas._calculate_device_layers()
+
+    # The loop cannot be ordered, so both fall back to layer 1.
+    assert layers == {"D": 1, "E": 1}
+
+
+def test_build_device_positions_places_layers_in_columns():
+    """Test if the layout puts each dependency layer in its own column."""
+    source_a = fake_device("A")
+    source_b = fake_device("B")
+    gate = fake_device(
+        "G", inputs={"I1": ("A", None), "I2": ("B", None)}
+    )
+    devices = FakeDevices([source_a, source_b, gate])
+    canvas = make_canvas(devices)
+    bounds = (0, 0, 1000, 600)
+
+    positions = canvas._build_device_positions(bounds)
+
+    assert set(positions) == {"A", "B", "G"}
+    # Sources share a column; the gate sits in the next column right.
+    assert positions["A"][0] == positions["B"][0]
+    assert positions["G"][0] > positions["A"][0]
+    for x_pos, y_pos, width, height in positions.values():
+        assert x_pos >= 0 and y_pos >= 0
+        assert x_pos + width <= 1000 and y_pos + height <= 600
+    assert canvas.circuit_grid["max_layer"] == 1
+    assert (
+        canvas.circuit_grid["rows"]["A"] != canvas.circuit_grid["rows"]["B"]
+    )
+
+
+def test_wire_routing_gives_each_wire_its_own_lane():
+    """Test if routed wires use distinct lanes and join the real pins."""
+    source_a = fake_device("A")
+    source_b = fake_device("B")
+    gate = fake_device(
+        "G", inputs={"I1": ("A", None), "I2": ("B", None)}
+    )
+    devices = FakeDevices([source_a, source_b, gate])
+    canvas = make_canvas(devices)
+    positions = canvas._build_device_positions((0, 0, 1000, 600))
+
+    paths = canvas._circuit_wire_paths(positions, canvas.circuit_grid)
+
+    assert len(paths) == 2
+    lane_xs = set()
+    for points, _signal in paths:
+        # Each segment is orthogonal (no diagonals).
+        for (x1, y1), (x2, y2) in zip(points, points[1:]):
+            assert x1 == x2 or y1 == y2
+        lane_xs.add(points[1][0])
+        # The route starts at an output pin and ends at an input pin.
+        assert points[0][0] in (
+            positions["A"][0] + positions["A"][2],
+            positions["B"][0] + positions["B"][2],
+        )
+        assert points[-1][0] == positions["G"][0]
+    # The two wires occupy different vertical lanes in the channel.
+    assert len(lane_xs) == 2
+
+
+def test_circuit_3d_layout_centres_the_floor_plan():
+    """Test if the 3D layout centres blocks and reports real spans."""
+    left = fake_device("A")
+    right = fake_device("G", inputs={"I1": ("A", None)})
+    devices = FakeDevices([left, right])
+    canvas = make_canvas(devices)
+    positions = canvas._build_device_positions((0, 0, 1000, 600))
+
+    layout = canvas._circuit_3d_layout(positions)
+
+    block_a = layout["blocks"]["A"]
+    block_g = layout["blocks"]["G"]
+    # The two blocks are symmetric about the centred origin, and the
+    # reported span is exactly the distance between their centres.
+    assert abs(block_a[0] + block_g[0]) < 1e-9
+    assert abs(layout["span_x"] - (block_g[0] - block_a[0])) < 1e-9
+    # Half-width is the scaled block width (116 px blocks at 0.6 scale).
+    assert abs(block_a[2] - 116 * 0.6 / 2) < 1e-9
+
+
+def test_circuit_block_height_3d_tracks_output_level():
+    """Test if 3D tower heights reflect the live output level."""
+    high_device = fake_device("H")
+    high_device.outputs = {None: FakeDevices.HIGH}
+    low_device = fake_device("L")
+    no_output = fake_device("N")
+    no_output.outputs = {}
+    devices = FakeDevices([high_device, low_device, no_output])
+    canvas = make_canvas(devices)
+
+    high = canvas._circuit_block_height_3d(high_device)
+    low = canvas._circuit_block_height_3d(low_device)
+    idle = canvas._circuit_block_height_3d(no_output)
+
+    assert high > idle > low
+
+
+def test_trace_3d_level_colour_dims_low_levels_only():
+    """Test if low 3D blocks are dimmed without losing identity."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    colour = (0.2, 0.4, 0.8)
+
+    assert canvas._trace_3d_level_colour(colour, devices.HIGH) == colour
+    dimmed = canvas._trace_3d_level_colour(colour, devices.LOW)
+    # Low blocks compress every channel toward a dim grey midpoint, so
+    # the overall colour darkens while staying recognisable and valid.
+    for channel, original in zip(dimmed, colour):
+        assert abs(channel - (original * 0.55 + 0.12)) < 1e-9
+        assert 0.0 <= channel <= 1.0
+    assert sum(dimmed) < sum(colour)
+
+
+def test_scope_label_and_cycle_helpers():
+    """Test the label width, recorded cycles, and port ordering maths."""
+    devices = FakeDevices(
+        [fake_device("A")],
+        {"A": "LONG_SIGNAL_NAME", "P1": "Z_OUT", "P2": "A_OUT"},
+    )
+    canvas = make_canvas(devices)
+    items = [(("A", None), [0, 1, 0]), (("A", "P1"), [1])]
+
+    assert canvas._max_recorded_cycles(items) == 3
+    assert canvas._max_recorded_cycles([]) == 0
+    # Long names widen the label margin beyond the minimum.
+    width = canvas._calculate_scope_label_width(items)
+    assert width == 28 + len("LONG_SIGNAL_NAME.Z_OUT") * 8
+    # Ports sort by DISPLAY name (P2 -> "A_OUT" before P1 -> "Z_OUT"),
+    # not by raw ID, with unnamed outputs first.
+    assert canvas._port_sort_name(None) == ""
+    assert canvas._sorted_port_ids({"P1": 1, None: 2, "P2": 3}) == [
+        None, "P2", "P1"
+    ]
+
+
+def test_pdf_builder_produces_wellformed_documents(tmp_path):
+    """Test if the PDF exporter writes a parseable one-page file."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    assert canvas._pdf_number(12.0) == "12"
+    assert canvas._pdf_number(8.25) == "8.25"
+
+    path = str(tmp_path / "scope.pdf")
+    canvas._write_image_pdf(path, 4, 2, bytes(4 * 2 * 3))
+    with open(path, "rb") as handle:
+        data = handle.read()
+    assert data.startswith(b"%PDF-1.4")
+    assert data.rstrip().endswith(b"%%EOF")
+    # Landscape page for a wide image, with the real pixel size.
+    assert b"/MediaBox [0 0 842 595]" in data
+    assert b"/Width 4 /Height 2" in data
+    assert data.count(b"endobj") == 5
+
+
+def test_update_3d_hover_drives_the_tooltip():
+    """Test if hovering 3D rows sets and clears the canvas tooltip."""
+    devices = FakeDevices([fake_device("A")], {"A": "SIG_A"})
+    canvas = make_canvas(devices)
+    tooltips = []
+    canvas.SetToolTip = lambda name: tooltips.append(name)
+    canvas.UnsetToolTip = lambda: tooltips.append(None)
+    canvas.trace_display_3d = True
+    canvas.scope_geometry = {
+        "plot": (0, 0, 400, 300),
+        "rows_3d": [
+            {"name": "SIG_A", "start": (10, 50), "end": (390, 60)}
+        ],
+    }
+
+    canvas._update_3d_hover(200, 55)
+    assert canvas.hover_3d_name == "SIG_A"
+    # Repeated hovering over the same row does not churn the tooltip.
+    canvas._update_3d_hover(210, 56)
+    canvas._update_3d_hover(200, 250)
+    assert canvas.hover_3d_name is None
+    assert tooltips == ["SIG_A", None]
+
+
+def test_theme_colour_differs_between_light_and_dark():
+    """Test if theme colours change with dark mode and stay valid."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    canvas.dark_mode = False
+    light = canvas._theme_colour("canvas_bg")
+    canvas.dark_mode = True
+    dark = canvas._theme_colour("canvas_bg")
+
+    assert light != dark
+    for colour in (light, dark):
+        assert len(colour) == 3
+        assert all(0.0 <= channel <= 1.0 for channel in colour)
+
+
+def test_estimate_circuit_height_grows_with_stacked_devices():
+    """Test if the circuit height estimate grows with layer crowding."""
+    small = FakeDevices([fake_device("A")])
+    crowded = FakeDevices([
+        fake_device("A"), fake_device("B"), fake_device("C"),
+        fake_device("D"),
+    ])
+
+    short = make_canvas(small)._estimate_circuit_height()
+    tall = make_canvas(crowded)._estimate_circuit_height()
+
+    assert tall > short
+
+
+def test_point_in_rect_handles_edges_and_missing_rects():
+    """Test if rectangle hit-testing includes edges and rejects None."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    rect = (10, 20, 100, 50)
+
+    assert canvas._point_in_rect(10, 20, rect)
+    assert canvas._point_in_rect(110, 70, rect)
+    assert not canvas._point_in_rect(9.9, 20, rect)
+    assert not canvas._point_in_rect(10, 70.1, rect)
+    assert not canvas._point_in_rect(50, 40, None)

@@ -5,9 +5,47 @@ can call these methods directly, and pytest can exercise the same behaviour
 without needing to open a window.
 """
 
+from __future__ import annotations
+
 
 class GuiController:
-    """Wrap simulator operations needed by the graphical interface."""
+    """Wrap simulator operations needed by the graphical interface.
+
+    Every method returns plain data (usually a ``(success, message)``
+    tuple or a list of display strings) so the GUI stays a thin layer
+    over the simulator and the behaviour is testable without wx.
+
+    Parameters
+    ----------
+    names: instance of the names.Names class.
+    devices: instance of the devices.Devices class.
+    network: instance of the network.Network class.
+    monitors: instance of the monitors.Monitors class.
+
+    Public methods
+    --------------
+    run_from_start(self, cycles): Cold-starts and runs the network.
+
+    continue_simulation(self, cycles): Runs further simulation cycles.
+
+    step_simulation(self): Runs exactly one simulation cycle.
+
+    set_switch(self, switch_name, switch_state): Sets a switch level.
+
+    add_monitor(self, signal_name): Starts monitoring a signal.
+
+    remove_monitor(self, signal_name): Stops monitoring a signal.
+
+    list_switches(self): Returns the names of all switches.
+
+    list_monitored_signals(self): Returns monitored signal names.
+
+    list_unmonitored_signals(self): Returns unmonitored signal names.
+
+    list_device_readings(self): Returns display rows of output levels.
+
+    get_existing_signal_ids(self, signal_name): Resolves a signal name.
+    """
 
     def __init__(self, names, devices, network, monitors):
         """Store simulator objects and initialise run state."""
@@ -17,9 +55,9 @@ class GuiController:
         self.monitors = monitors
         self.cycles_completed = 0
 
-    def run_from_start(self, cycles):
+    def run_from_start(self, cycles: int) -> tuple[bool, str]:
         """Cold-start the network and run for the requested cycles."""
-        cycles = self.validate_cycles(cycles)
+        cycles = self._validate_cycles(cycles)
         if cycles is None:
             return False, "Number of cycles must be zero or greater."
 
@@ -27,21 +65,21 @@ class GuiController:
         self.monitors.reset_monitors()
         self.devices.cold_startup()
 
-        success, message, cycles_run = self.run_network(cycles)
+        success, message, cycles_run = self._run_network(cycles)
         self.cycles_completed += cycles_run
         if success:
             return True, "Running for " + str(cycles) + " cycles."
         return False, message
 
-    def continue_simulation(self, cycles):
+    def continue_simulation(self, cycles: int) -> tuple[bool, str]:
         """Continue a network that has already been run."""
-        cycles = self.validate_cycles(cycles)
+        cycles = self._validate_cycles(cycles)
         if cycles is None:
             return False, "Number of cycles must be zero or greater."
         if self.cycles_completed == 0:
             return False, "Nothing to continue. Run first."
 
-        success, message, cycles_run = self.run_network(cycles)
+        success, message, cycles_run = self._run_network(cycles)
         self.cycles_completed += cycles_run
         if success:
             return (
@@ -54,12 +92,12 @@ class GuiController:
             )
         return False, message
 
-    def step_simulation(self):
+    def step_simulation(self) -> tuple[bool, str]:
         """Run exactly one cycle, cold-starting if necessary."""
         if self.cycles_completed == 0:
             return self.run_from_start(1)
 
-        success, message, cycles_run = self.run_network(1)
+        success, message, cycles_run = self._run_network(1)
         self.cycles_completed += cycles_run
         if success:
             return (
@@ -70,7 +108,7 @@ class GuiController:
             )
         return False, message
 
-    def run_network(self, cycles):
+    def _run_network(self, cycles):
         """Run the network for a number of cycles.
 
         Return a tuple containing success, message, and the number of cycles
@@ -84,7 +122,8 @@ class GuiController:
             cycles_run += 1
         return True, "", cycles_run
 
-    def set_switch(self, switch_name, switch_state):
+    def set_switch(self, switch_name: str,
+                   switch_state: int | str) -> tuple[bool, str]:
         """Set the named switch to 0 or 1."""
         switch_id = self.names.query(switch_name)
         if switch_id is None:
@@ -107,7 +146,7 @@ class GuiController:
 
         return False, switch_name + " is not a switch."
 
-    def add_monitor(self, signal_name):
+    def add_monitor(self, signal_name: str) -> tuple[bool, str]:
         """Add a monitor point for the selected output signal."""
         signal_ids = self.get_existing_signal_ids(signal_name)
         if signal_ids is None:
@@ -128,7 +167,7 @@ class GuiController:
             return False, "Unknown device in signal: " + signal_name
         return False, "Could not add monitor " + signal_name + "."
 
-    def remove_monitor(self, signal_name):
+    def remove_monitor(self, signal_name: str) -> tuple[bool, str]:
         """Remove a monitor point for the selected output signal."""
         signal_ids = self.get_existing_signal_ids(signal_name)
         if signal_ids is None:
@@ -139,24 +178,24 @@ class GuiController:
             return True, "Removed monitor " + signal_name + "."
         return False, "Monitor is not present: " + signal_name
 
-    def list_switches(self):
+    def list_switches(self) -> list[str]:
         """Return switch device names in definition order."""
         switch_names = []
         for device_id in self.devices.find_devices(self.devices.SWITCH):
             switch_names.append(self.names.get_name_string(device_id))
         return switch_names
 
-    def list_monitored_signals(self):
+    def list_monitored_signals(self) -> list[str]:
         """Return signal names that are currently monitored."""
         monitored, _ = self.monitors.get_signal_names()
         return monitored
 
-    def list_unmonitored_signals(self):
+    def list_unmonitored_signals(self) -> list[str]:
         """Return output signal names that are not currently monitored."""
         _, unmonitored = self.monitors.get_signal_names()
         return unmonitored
 
-    def list_device_readings(self):
+    def list_device_readings(self) -> list[str]:
         """Return readable current output values for all devices."""
         readings = []
         for device in self.devices.devices_list:
@@ -164,31 +203,31 @@ class GuiController:
             if device.device_kind == self.devices.SWITCH:
                 readings.append(
                     device_name + " = "
-                    + self.signal_to_text(device.switch_state)
+                    + self._signal_to_text(device.switch_state)
                 )
                 continue
 
-            for output_id in self.sorted_output_ids(device.outputs):
+            for output_id in self._sorted_output_ids(device.outputs):
                 signal_name = self.devices.get_signal_name(
                     device.device_id, output_id
                 )
                 readings.append(
                     signal_name + " = "
-                    + self.signal_to_text(device.outputs[output_id])
+                    + self._signal_to_text(device.outputs[output_id])
                 )
         return readings
 
-    def sorted_output_ids(self, outputs):
+    def _sorted_output_ids(self, outputs):
         """Return output port IDs in a stable display order."""
-        return sorted(outputs, key=self.output_sort_name)
+        return sorted(outputs, key=self._output_sort_name)
 
-    def output_sort_name(self, output_id):
+    def _output_sort_name(self, output_id):
         """Return the display name used to sort an output port."""
         if output_id is None:
             return ""
         return str(self.names.get_name_string(output_id))
 
-    def signal_to_text(self, signal):
+    def _signal_to_text(self, signal):
         """Return a short display string for a simulator signal value."""
         if signal == self.devices.LOW:
             return "0"
@@ -202,7 +241,8 @@ class GuiController:
             return "-"
         return "?"
 
-    def get_existing_signal_ids(self, signal_name):
+    def get_existing_signal_ids(self,
+                                signal_name: str) -> tuple | None:
         """Return IDs for an existing signal name, without adding names."""
         if not isinstance(signal_name, str) or signal_name == "":
             return None
@@ -225,7 +265,7 @@ class GuiController:
 
         return device_id, output_id
 
-    def validate_cycles(self, cycles):
+    def _validate_cycles(self, cycles):
         """Return a non-negative cycle count, or None if invalid."""
         try:
             cycles = int(cycles)

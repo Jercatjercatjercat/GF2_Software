@@ -10,7 +10,6 @@ Gui - configures the main window and all the widgets.
 """
 import wx
 import wx.glcanvas as wxcanvas
-import numpy as np
 import math
 from OpenGL import GL, GLU, GLUT
 
@@ -82,7 +81,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_mouse_y = 0  # previous mouse y position
 
         # Initialise the scene rotation matrix
-        self.scene_rotate = np.identity(4, 'f')
+        self.scene_rotate = [
+            [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0],
+        ]
 
         # Initialise variables for zooming
         self.zoom = 1
@@ -252,7 +254,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 self.pan_x += x
                 self.pan_y -= y
             GL.glMultMatrixf(self.scene_rotate)
-            GL.glGetFloatv(GL.GL_MODELVIEW_MATRIX, self.scene_rotate)
+            self.scene_rotate = GL.glGetFloatv(
+                GL.GL_MODELVIEW_MATRIX
+            )
             self.last_mouse_x = event.GetX()
             self.last_mouse_y = event.GetY()
             self.init = False
@@ -397,7 +401,7 @@ class Gui3D(BaseGui):
         """Enable the oscilloscope 3D trace view and synchronise the toggle."""
         self.canvas.set_trace_display_3d(True)
         self.trace_display_button.SetValue(True)
-        self.set_status(self.t("trace_display_3d_enabled"))
+        self._set_status(self.t("trace_display_3d_enabled"))
 
 
 Gui = Gui3D
