@@ -3533,6 +3533,7 @@ class Gui(wx.Frame):
                 "background": wx.Colour(28, 32, 38),
                 "panel": wx.Colour(34, 39, 46),
                 "control": wx.Colour(43, 49, 58),
+                "toggle_active": wx.Colour(66, 103, 152),
                 "text": wx.Colour(231, 235, 240),
                 "muted": wx.Colour(184, 193, 204),
                 "log": wx.Colour(24, 28, 34),
@@ -3541,6 +3542,7 @@ class Gui(wx.Frame):
             "background": wx.Colour(245, 247, 250),
             "panel": wx.Colour(245, 247, 250),
             "control": wx.Colour(255, 255, 255),
+            "toggle_active": wx.Colour(176, 208, 246),
             "text": wx.Colour(22, 26, 32),
             "muted": wx.Colour(80, 86, 96),
             "log": wx.Colour(250, 251, 253),
@@ -3591,8 +3593,30 @@ class Gui(wx.Frame):
             control.SetBackgroundColour(theme["control"])
 
         self.log_text.SetBackgroundColour(theme["log"])
+        self._refresh_toggle_styles()
         self.Refresh()
         self.Layout()
+
+    def _refresh_toggle_styles(self):
+        """Fill active toggle buttons so their state is visible at a glance.
+
+        Theming the buttons with a flat colour hides the native pressed
+        look of wx.ToggleButton, so without this it is hard to tell
+        whether Auto Run, Maximise, or the 3D switches are currently on;
+        active toggles get a distinct accent fill instead.
+        """
+        theme = self._gui_theme()
+        for button in (
+            self.auto_run_button, self.maximise_circuit_button,
+            self.maximise_scope_button, self.trace_display_button,
+            self.circuit_3d_button,
+        ):
+            if button.GetValue():
+                button.SetBackgroundColour(theme["toggle_active"])
+            else:
+                button.SetBackgroundColour(theme["control"])
+            button.SetForegroundColour(theme["text"])
+            button.Refresh()
 
     def _configure_menu(self):
         """Create the File, Settings, and Help menus."""
@@ -3954,6 +3978,7 @@ class Gui(wx.Frame):
             self._set_status(self.t("trace_display_3d_enabled"))
         else:
             self._set_status(self.t("trace_display_2d_enabled"))
+        self._refresh_toggle_styles()
 
     def on_circuit_3d_button(self, event: wx.CommandEvent) -> None:
         """Switch the circuit overview between 2D and 3D."""
@@ -3963,6 +3988,7 @@ class Gui(wx.Frame):
             self._set_status(self.t("circuit_3d_enabled"))
         else:
             self._set_status(self.t("circuit_3d_disabled"))
+        self._refresh_toggle_styles()
 
     def on_maximise_circuit_button(self, event: wx.CommandEvent) -> None:
         """Maximise the circuit overview, or restore the split view."""
@@ -3984,6 +4010,7 @@ class Gui(wx.Frame):
         """Switch the canvas layout and report the active view."""
         self.maximise_circuit_button.SetValue(mode == "circuit")
         self.maximise_scope_button.SetValue(mode == "scope")
+        self._refresh_toggle_styles()
         self.canvas.set_view_mode(mode)
         messages = {
             "split": "view_mode_split",
@@ -4214,6 +4241,7 @@ class Gui(wx.Frame):
         else:
             self._stop_auto_run()
             self._set_status(self.t("auto_run_stopped"))
+        self._refresh_toggle_styles()
 
     def on_auto_timer(self, event: wx.TimerEvent) -> None:
         """Advance one cycle whenever the auto-run timer fires."""
@@ -4242,6 +4270,7 @@ class Gui(wx.Frame):
             self.auto_timer.Stop()
         if self.auto_run_button.GetValue():
             self.auto_run_button.SetValue(False)
+            self._refresh_toggle_styles()
 
     def on_set_switch_button(self, event: wx.CommandEvent) -> None:
         """Set the selected switch to the selected value."""
@@ -4281,6 +4310,11 @@ class Gui(wx.Frame):
         self._restore_default_monitors()
         self._refresh_choices()
         self.canvas.reset_view()
+        # reset_view returns the canvas to the split layout, so the
+        # maximise toggles must match or they would show a stale press.
+        self.maximise_circuit_button.SetValue(False)
+        self.maximise_scope_button.SetValue(False)
+        self._refresh_toggle_styles()
         self._set_status(self.t("view_reset"))
 
     def on_open_file(self) -> None:
