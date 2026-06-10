@@ -147,6 +147,10 @@ def make_canvas(devices):
     canvas.min_row_band = 11
     canvas.high_offset = 18
     canvas.low_offset = 4
+    canvas.circuit_pin_spacing = 12
+    canvas.circuit_margin_x = 36
+    canvas.circuit_margin_top = 46
+    canvas.circuit_margin_bottom = 24
     canvas.scope_first_cycle = 0
     canvas.scope_first_row = 0
     canvas.scope_row_zoom = 1.0

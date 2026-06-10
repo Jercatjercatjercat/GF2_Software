@@ -126,6 +126,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.min_row_band = 11
         self.high_offset = 18
         self.low_offset = 4
+        self.circuit_pin_spacing = 12
+        self.circuit_margin_x = 36
+        self.circuit_margin_top = 46
+        self.circuit_margin_bottom = 24
         self.trace_colours = [
             (0.20, 0.23, 0.78),
             (0.16, 0.50, 0.26),
@@ -674,88 +678,117 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.end_scissor()
         self.draw_circuit_scrollbars(view_bounds)
 
-    def build_device_positions(self, bounds):
-        """Return a simple layered layout for all devices."""
-        x_pos, y_pos, width, height = bounds
+    def circuit_metrics(self):
+        """Return shared sizing for circuit layout and routing.
+
+        Devices share a single set of rows across every column so the gaps
+        between rows form clear horizontal routing corridors, and uniform
+        column pitches leave clear vertical channels between columns.
+        """
         layers = self.calculate_device_layers()
-        layer_groups = {}
+        groups = {}
         for device in self.devices.devices_list:
-            layer = layers.get(device.device_id, 1)
-            layer_groups.setdefault(layer, []).append(device)
-
-        max_layer = max(layer_groups) if layer_groups else 0
-        positions = {}
-        longest_name = max(
-            len(str(self.devices.names.get_name_string(device.device_id)))
-            for device in self.devices.devices_list
-        )
-        block_width = min(180, max(112, longest_name * 8 + 24))
-        block_height = 34
-        usable_width = max(width - block_width - 90, 1)
-        top_padding = 42
-        bottom_padding = 14
-
-        for layer, devices_in_layer in layer_groups.items():
-            if max_layer == 0:
-                node_x = x_pos + width / 2 - block_width / 2
-            else:
-                node_x = x_pos + 48 + layer * usable_width / max_layer
-
-            count = len(devices_in_layer)
-            available_height = max(
-                height - top_padding - bottom_padding - block_height, 1
+            groups.setdefault(layers.get(device.device_id, 1), []).append(
+                device
             )
-            for index, device in enumerate(devices_in_layer):
-                if count == 1:
-                    node_y = y_pos + height / 2 - block_height / 2 - 4
-                else:
-                    gap = available_height / (count - 1)
-                    node_y = (
-                        y_pos + bottom_padding
-                        + (count - 1 - index) * gap
-                    )
-                positions[device.device_id] = (
-                    node_x, node_y, block_width, block_height
-                )
+        max_layer = max(groups) if groups else 0
+        total_rows = max((len(group) for group in groups.values()), default=1)
+        longest_name = max(
+            (len(str(self.devices.names.get_name_string(device.device_id)))
+             for device in self.devices.devices_list),
+            default=4,
+        )
+        max_pins = max(
+            (max(len(device.inputs), len(device.outputs), 1)
+             for device in self.devices.devices_list),
+            default=1,
+        )
+        return {
+            "layers": layers,
+            "groups": groups,
+            "max_layer": max_layer,
+            "total_rows": total_rows,
+            "block_width": min(190, max(116, longest_name * 8 + 26)),
+            "band_height": max(40, max_pins * self.circuit_pin_spacing + 16),
+        }
 
+    def device_block_height(self, device):
+        """Return the drawn height of a device, sized for its pin count."""
+        pins = max(len(device.inputs), len(device.outputs), 1)
+        return max(34, pins * self.circuit_pin_spacing + 12)
+
+    def build_device_positions(self, bounds):
+        """Return a grid layout with devices aligned to shared rows."""
+        x_pos, y_pos, width, height = bounds
+        metrics = self.circuit_metrics()
+        block_width = metrics["block_width"]
+        band_height = metrics["band_height"]
+        max_layer = metrics["max_layer"]
+        total_rows = metrics["total_rows"]
+
+        if max_layer > 0:
+            col_pitch = (width - 2 * self.circuit_margin_x - block_width)
+            col_pitch = max(col_pitch / max_layer, block_width + 90)
+        else:
+            col_pitch = 0
+        if total_rows > 1:
+            row_pitch = (
+                height - self.circuit_margin_top - self.circuit_margin_bottom
+                - band_height
+            )
+            row_pitch = max(row_pitch / (total_rows - 1), band_height + 26)
+        else:
+            row_pitch = 0
+
+        left = x_pos + self.circuit_margin_x
+        top = y_pos + height - self.circuit_margin_top - band_height
+        positions = {}
+        rows = {}
+        for layer in sorted(metrics["groups"]):
+            group = metrics["groups"][layer]
+            start_row = (total_rows - len(group)) // 2
+            col_left = left + layer * col_pitch
+            for index, device in enumerate(group):
+                row = start_row + index
+                band_bottom = top - row * row_pitch
+                device_height = self.device_block_height(device)
+                node_y = band_bottom + (band_height - device_height) / 2
+                positions[device.device_id] = (
+                    col_left, node_y, block_width, device_height
+                )
+                rows[device.device_id] = row
+
+        self.circuit_grid = {
+            "left": left, "top": top, "col_pitch": col_pitch,
+            "row_pitch": row_pitch, "block_width": block_width,
+            "band_height": band_height, "max_layer": max_layer,
+            "total_rows": total_rows, "layers": metrics["layers"],
+            "rows": rows,
+        }
         return positions
 
     def circuit_content_size(self, view_width, view_height):
-        """Return virtual circuit dimensions for large diagrams."""
-        layers = self.calculate_device_layers()
-        layer_counts = {}
-        for device in self.devices.devices_list:
-            layer = layers.get(device.device_id, 1)
-            layer_counts[layer] = layer_counts.get(layer, 0) + 1
+        """Return virtual circuit dimensions that keep routing room."""
+        metrics = self.circuit_metrics()
+        max_layer = metrics["max_layer"]
+        total_rows = metrics["total_rows"]
+        min_col_gap = 90
+        min_row_gap = 26
 
-        layer_count = max(layer_counts, default=0) + 1
-        max_devices_in_layer = max(layer_counts.values(), default=1)
-        complex_circuit = (
-            len(self.devices.devices_list) > 12
-            or layer_count > 5
-            or max_devices_in_layer > 6
+        natural_width = (
+            2 * self.circuit_margin_x
+            + (max_layer + 1) * metrics["block_width"]
+            + max_layer * min_col_gap
         )
-        if not complex_circuit:
-            return view_width, view_height
-
-        longest_name = max(
-            len(str(self.devices.names.get_name_string(device.device_id)))
-            for device in self.devices.devices_list
+        natural_height = (
+            self.circuit_margin_top + self.circuit_margin_bottom
+            + total_rows * metrics["band_height"]
+            + max(0, total_rows - 1) * min_row_gap
         )
-        block_width = min(180, max(112, longest_name * 8 + 24))
-        block_height = 34
-        layer_gap = 118
-        row_gap = 18
-
-        content_width = (
-            40 + layer_count * block_width
-            + max(0, layer_count - 1) * layer_gap
+        return (
+            max(view_width, natural_width),
+            max(view_height, natural_height),
         )
-        content_height = (
-            42 + max_devices_in_layer * block_height
-            + max(0, max_devices_in_layer - 1) * row_gap
-        )
-        return max(view_width, content_width), max(view_height, content_height)
 
     def draw_circuit_scrollbars(self, view_bounds):
         """Draw scrollbars for oversized circuit diagrams."""
@@ -871,52 +904,141 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         return layers
 
     def draw_connections(self, positions):
-        """Draw wires between connected device ports."""
-        for target_device in self.devices.devices_list:
-            if target_device.device_id not in positions:
+        """Route wires through clear channels and corridors between devices.
+
+        Wires only travel vertically inside the gaps between columns and
+        horizontally inside the gaps between rows, so no wire is ever drawn
+        across a device block.  Each wire is given its own lane in a channel
+        and its own track in a corridor so they never sit on top of one
+        another.
+        """
+        grid = getattr(self, "circuit_grid", None)
+        if not grid:
+            return
+
+        wires = self.collect_circuit_wires(positions, grid)
+        self.assign_wire_lanes(wires)
+        for wire in wires:
+            self.draw_wire_path(self.route_circuit_wire(wire, grid),
+                                wire["signal"])
+
+    def collect_circuit_wires(self, positions, grid):
+        """Return a routed-wire description for every connected input."""
+        wires = []
+        for target in self.devices.devices_list:
+            if target.device_id not in positions:
                 continue
-
-            input_ids = self.sorted_port_ids(target_device.inputs)
-            for input_index, input_id in enumerate(input_ids):
-                connected_output = target_device.inputs[input_id]
-                if connected_output is None:
+            for input_id in self.sorted_port_ids(target.inputs):
+                connected = target.inputs[input_id]
+                if connected is None:
                     continue
-
-                source_device_id, output_id = connected_output
-                if source_device_id not in positions:
+                source_id, output_id = connected
+                if source_id not in positions:
                     continue
+                source = self.devices.get_device(source_id)
+                wires.append({
+                    "start": self.output_pin(
+                        positions[source_id], source, output_id
+                    ),
+                    "end": self.input_pin(
+                        positions[target.device_id], target, input_id
+                    ),
+                    "source_layer": grid["layers"].get(source_id, 0),
+                    "target_layer": grid["layers"].get(target.device_id, 0),
+                    "source_row": grid["rows"].get(source_id, 0),
+                    "target_row": grid["rows"].get(target.device_id, 0),
+                    "signal": source.outputs.get(output_id),
+                })
+        return wires
 
-                source_device = self.devices.get_device(source_device_id)
-                source_pos = positions[source_device_id]
-                target_pos = positions[target_device.device_id]
-                start = self.output_pin(source_pos, source_device, output_id)
-                end = self.input_pin(target_pos, target_device, input_id)
-                signal = source_device.outputs.get(output_id)
-                self.draw_connection_line(start, end, signal, input_index)
+    def assign_wire_lanes(self, wires):
+        """Give every wire unique channel lanes and corridor tracks."""
+        channels = {}
+        corridors = {}
+        highway = []
+        for wire in wires:
+            wire["channel_index"] = {}
+            source_layer = wire["source_layer"]
+            target_layer = wire["target_layer"]
+            if target_layer == source_layer + 1:
+                wire["route"] = "adjacent"
+                wire["main_channel"] = source_layer
+                channels.setdefault(source_layer, []).append(wire)
+            elif target_layer > source_layer:
+                wire["route"] = "span"
+                wire["out_channel"] = source_layer
+                wire["in_channel"] = target_layer - 1
+                channels.setdefault(source_layer, []).append(wire)
+                channels.setdefault(target_layer - 1, []).append(wire)
+                side = ("below" if wire["target_row"] >= wire["source_row"]
+                        else "above")
+                wire["corridor_key"] = (side, wire["source_row"])
+                corridors.setdefault(wire["corridor_key"], []).append(wire)
+            else:
+                wire["route"] = "feedback"
+                wire["out_channel"] = source_layer
+                wire["in_channel"] = max(target_layer - 1, 0)
+                channels.setdefault(source_layer, []).append(wire)
+                channels.setdefault(max(target_layer - 1, 0), []).append(wire)
+                highway.append(wire)
 
-    def draw_connection_line(self, start, end, signal, input_index):
-        """Draw one routed circuit wire."""
-        x_start, y_start = start
-        x_end, y_end = end
-        self.set_signal_colour(signal)
-        GL.glLineWidth(1.4)
-        GL.glBegin(GL.GL_LINE_STRIP)
+        for channel, channel_wires in channels.items():
+            for lane, wire in enumerate(channel_wires):
+                wire["channel_index"][channel] = (lane, len(channel_wires))
+        for corridor_wires in corridors.values():
+            for track, wire in enumerate(corridor_wires):
+                wire["corridor_track"] = (track, len(corridor_wires))
+        for track, wire in enumerate(highway):
+            wire["highway_track"] = (track, len(highway))
 
-        if x_end <= x_start:
-            route_y = max(y_start, y_end) + 28 + 9 * (input_index % 3)
-            GL.glVertex2f(x_start, y_start)
-            GL.glVertex2f(x_start + 18, y_start)
-            GL.glVertex2f(x_start + 18, route_y)
-            GL.glVertex2f(x_end - 18, route_y)
-            GL.glVertex2f(x_end - 18, y_end)
-            GL.glVertex2f(x_end, y_end)
+    def circuit_channel_x(self, grid, channel, wire):
+        """Return the x of a wire's vertical lane within a channel."""
+        lane, count = wire["channel_index"][channel]
+        channel_left = (
+            grid["left"] + channel * grid["col_pitch"] + grid["block_width"]
+        )
+        channel_width = grid["col_pitch"] - grid["block_width"]
+        return channel_left + (lane + 1) * channel_width / (count + 1)
+
+    def circuit_corridor_y(self, grid, wire):
+        """Return the y of a wire's horizontal track within a corridor."""
+        side, row = wire["corridor_key"]
+        track, count = wire["corridor_track"]
+        corridor_height = max(grid["row_pitch"] - grid["band_height"], 30)
+        band_bottom = grid["top"] - row * grid["row_pitch"]
+        offset = (track + 1) * corridor_height / (count + 1)
+        if side == "below":
+            return band_bottom - offset
+        return band_bottom + grid["band_height"] + offset
+
+    def route_circuit_wire(self, wire, grid):
+        """Return the orthogonal point list for one routed wire."""
+        x_start, y_start = wire["start"]
+        x_end, y_end = wire["end"]
+        if wire["route"] == "adjacent":
+            lane_x = self.circuit_channel_x(grid, wire["main_channel"], wire)
+            return [(x_start, y_start), (lane_x, y_start),
+                    (lane_x, y_end), (x_end, y_end)]
+
+        out_x = self.circuit_channel_x(grid, wire["out_channel"], wire)
+        in_x = self.circuit_channel_x(grid, wire["in_channel"], wire)
+        if wire["route"] == "span":
+            corridor_y = self.circuit_corridor_y(grid, wire)
         else:
-            mid_x = (x_start + x_end) / 2
-            GL.glVertex2f(x_start, y_start)
-            GL.glVertex2f(mid_x, y_start)
-            GL.glVertex2f(mid_x, y_end)
-            GL.glVertex2f(x_end, y_end)
+            track, _ = wire["highway_track"]
+            corridor_y = grid["top"] + grid["band_height"] + 10 + track * 8
+        return [(x_start, y_start), (out_x, y_start), (out_x, corridor_y),
+                (in_x, corridor_y), (in_x, y_end), (x_end, y_end)]
 
+    def draw_wire_path(self, points, signal):
+        """Draw an orthogonal wire through the given points."""
+        if len(points) < 2:
+            return
+        self.set_signal_colour(signal)
+        GL.glLineWidth(1.6)
+        GL.glBegin(GL.GL_LINE_STRIP)
+        for x_pos, y_pos in points:
+            GL.glVertex2f(x_pos, y_pos)
         GL.glEnd()
         GL.glLineWidth(1.0)
 
@@ -927,22 +1049,20 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         name = self.devices.names.get_name_string(device.device_id)
         fill_colour = self.device_fill_colour(device)
 
-        max_chars = max(6, int(width / 8) - 1)
-        display_name = self.truncate_label(str(name), max_chars)
-        display_kind = self.truncate_label(str(kind), max_chars)
-
         self.draw_rectangle(
             bounds, fill_colour, self.theme_colour("device_border")
         )
-        self.render_text(display_name, x_pos + 8, y_pos + height - 14)
-        self.render_text(
-            display_kind, x_pos + 8, y_pos + 8,
+        self.render_scaled_text(
+            name, x_pos + 8, y_pos + height - 19, 13, width - 16
+        )
+        self.render_scaled_text(
+            kind, x_pos + 8, y_pos + 6, 11, width - 16,
             self.theme_colour("subtle_text")
         )
 
         for input_id in self.sorted_port_ids(device.inputs):
             pin_x, pin_y = self.input_pin(bounds, device, input_id)
-            self.draw_circle(pin_x, pin_y, 3.2, (0.98, 0.98, 0.98))
+            self.draw_circle(pin_x, pin_y, 4.0, (0.98, 0.98, 0.98))
 
         for output_id in self.sorted_port_ids(device.outputs):
             pin_x, pin_y = self.output_pin(bounds, device, output_id)
@@ -1927,15 +2047,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return ""
         return str(self.devices.names.get_name_string(port_id))
 
-    def truncate_label(self, label, max_chars):
-        """Return a shortened label that fits compact graphics."""
-        if label is None:
-            return ""
-        label = str(label)
-        if len(label) <= max_chars:
-            return label
-        return label[:max_chars - 1] + "."
-
     def canvas_pixel_rect(self, bounds):
         """Return transformed integer canvas pixels for a drawing rectangle."""
         x_pos, y_pos, width, height = bounds
@@ -2393,6 +2504,34 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                 GL.glRasterPos2f(x_pos, y_pos)
             else:
                 GLUT.glutBitmapCharacter(font, ord(character))
+
+    def render_scaled_text(self, text, x_pos, y_pos, pixel_height,
+                           max_width=None, colour=None):
+        """Draw vector text whose size scales with the current zoom.
+
+        Unlike the bitmap labels, stroke text is real geometry, so circuit
+        labels shrink and grow with the circuit zoom and stay inside their
+        device blocks instead of overflowing when zoomed out.
+        """
+        text = str(text)
+        if colour is None:
+            colour = self.theme_colour("text")
+        font = GLUT.GLUT_STROKE_ROMAN
+        width_units = sum(
+            GLUT.glutStrokeWidth(font, ord(character)) for character in text
+        ) or 1.0
+        scale = pixel_height / 119.05
+        if max_width is not None and width_units * scale > max_width:
+            scale = max_width / width_units
+        self.set_colour(*colour)
+        GL.glPushMatrix()
+        GL.glTranslatef(x_pos, y_pos, 0.0)
+        GL.glScalef(scale, scale, scale)
+        GL.glLineWidth(1.1)
+        for character in text:
+            GLUT.glutStrokeCharacter(font, ord(character))
+        GL.glLineWidth(1.0)
+        GL.glPopMatrix()
 
     def set_colour(self, red, green, blue):
         """Set the OpenGL drawing colour."""
