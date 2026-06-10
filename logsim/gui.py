@@ -88,6 +88,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_scroll_y = 0
         self.circuit_zoom = 1.0
         self.scope_cycle_zoom = 1.0
+        self.scope_row_zoom = 1.0
         self.circuit_drag_mode = None
         self.circuit_drag_offset = 0
         self.circuit_geometry = {}
@@ -104,7 +105,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_circuit_bounds = None
         self.last_scope_bounds = None
         self.trace_display_3d = False
-        self.trace_3d_art_style = "modern"
         self.trace_3d_rotate_x = 28.0
         self.trace_3d_rotate_y = -34.0
         self.trace_3d_pan_x = 0.0
@@ -123,6 +123,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.default_cycle_width = 28
         self.cycle_width = self.default_cycle_width
         self.row_height = 34
+        self.min_row_band = 11
         self.high_offset = 18
         self.low_offset = 4
         self.trace_colours = [
@@ -168,6 +169,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_scroll_y = 0
         self.circuit_zoom = 1.0
         self.scope_cycle_zoom = 1.0
+        self.scope_row_zoom = 1.0
         self.circuit_drag_mode = None
         self.scope_first_cycle = 0
         self.scope_first_row = 0
@@ -182,14 +184,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Switch between conventional 2D and perspective 3D traces."""
         self.trace_display_3d = bool(enabled)
         self.trace_3d_drag_active = False
-        self.init = False
-        self.Refresh()
-
-    def set_trace_3d_art_style(self, style):
-        """Switch between the maintained and template 3D drawing styles."""
-        if style not in ("modern", "template"):
-            style = "modern"
-        self.trace_3d_art_style = style
         self.init = False
         self.Refresh()
 
@@ -247,11 +241,19 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
         self.Refresh()
 
+    def zoom_scope_rows(self, factor):
+        """Zoom the oscilloscope vertically to show fewer or more signals."""
+        self.scope_row_zoom = self.clamp(
+            self.scope_row_zoom * factor, 0.2, 3.0
+        )
+        self.Refresh()
+
     def fit_scope(self):
         """Frame the whole oscilloscope so all of it is visible at once."""
         self.scope_first_cycle = 0
         self.scope_first_row = 0
         self.follow_latest_cycles = False
+        self.scope_row_zoom = self.fit_row_zoom()
         if self.trace_display_3d:
             # Hundreds of blocks are never legible in 3D, so reset to a
             # readable time window and re-frame the perspective camera.
@@ -270,6 +272,16 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         else:
             self.scope_cycle_zoom = 0.25
         self.Refresh()
+
+    def fit_row_zoom(self):
+        """Return the vertical zoom that fits every monitor row on screen."""
+        total_rows = len(self.monitors.monitors_dictionary)
+        plot_height = getattr(self, "last_scope_plot_height", 0)
+        if total_rows <= 0 or plot_height <= 0:
+            return 1.0
+        return self.clamp(
+            plot_height / (self.row_height * total_rows), 0.2, 1.0
+        )
 
     def set_dark_mode(self, enabled):
         """Apply dark or light drawing colours to the canvas."""
@@ -1020,6 +1032,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_scope_plot_width = plot_width
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
+        self.last_scope_plot_height = plot_height
 
         scope_cycle_zoom = getattr(self, "scope_cycle_zoom", 1.0)
         zoomed_cycle_width = self.default_cycle_width * scope_cycle_zoom
@@ -1032,9 +1045,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.cycle_width = plot_width / max(cycle_count, 1)
 
             total_rows = len(monitor_items)
-            visible_rows = min(
-                total_rows, max(1, int(plot_height // self.row_height))
-            )
+            visible_rows = self.scope_visible_rows(plot_height, total_rows)
             max_first_row = max(total_rows - visible_rows, 0)
             self.scope_first_row = self.clamp(
                 self.scope_first_row, 0, max_first_row
@@ -1078,9 +1089,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.cycle_width = plot_width / max(cycle_count, 1)
 
         total_rows = len(monitor_items)
-        visible_rows = min(
-            total_rows, max(1, int(plot_height // self.row_height))
-        )
+        visible_rows = self.scope_visible_rows(plot_height, total_rows)
         max_first_row = max(total_rows - visible_rows, 0)
         self.scope_first_row = self.clamp(
             self.scope_first_row, 0, max_first_row
@@ -1147,6 +1156,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.last_scope_plot_width = plot_width
         control_y = scope_y + scope_height - title_height - control_height
         plot_height = control_y - plot_y - 8
+        self.last_scope_plot_height = plot_height
         if plot_width <= 0 or plot_height <= 0:
             return
 
@@ -1161,9 +1171,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.scope_first_cycle = 0
             self.cycle_width = plot_width / max(cycle_count, 1)
             total_rows = len(monitor_items)
-            visible_rows = min(
-                total_rows, max(1, int(plot_height // self.row_height))
-            )
+            visible_rows = self.scope_visible_rows(plot_height, total_rows)
             max_first_row = max(total_rows - visible_rows, 0)
             self.scope_first_row = self.clamp(
                 self.scope_first_row, 0, max_first_row
@@ -1209,9 +1217,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.cycle_width = plot_width / max(cycle_count, 1)
 
         total_rows = len(monitor_items)
-        visible_rows = min(
-            total_rows, max(1, int(plot_height // self.row_height))
-        )
+        visible_rows = self.scope_visible_rows(plot_height, total_rows)
         max_first_row = max(total_rows - visible_rows, 0)
         self.scope_first_row = self.clamp(
             self.scope_first_row, 0, max_first_row
@@ -1312,13 +1318,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                            monitor_items, first_cycle, cycle_count,
                            first_row, use_blank=False):
         """Render the visible monitor window in a perspective sub-viewport."""
-        if self.trace_3d_art_style == "template":
-            self.draw_template_3d_trace_view(
-                plot_x, plot_y, plot_width, plot_height, monitor_items,
-                first_cycle, cycle_count, first_row, use_blank
-            )
-            return
-
         self.draw_rectangle(
             (plot_x, plot_y, plot_width, plot_height),
             self.theme_colour("scope_bg"),
@@ -1392,75 +1391,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glLineWidth(1.0)
             self.configure_2d_projection(size)
 
-    def draw_template_3d_trace_view(self, plot_x, plot_y, plot_width,
-                                    plot_height, monitor_items, first_cycle,
-                                    cycle_count, first_row, use_blank=False):
-        """Render traces using the old gui_3D.py black cuboid scene style."""
-        self.draw_rectangle(
-            (plot_x, plot_y, plot_width, plot_height),
-            (0.0, 0.0, 0.0),
-            (0.36, 0.36, 0.36),
-        )
-
-        viewport = self.canvas_pixel_rect(
-            (plot_x, plot_y, plot_width, plot_height)
-        )
-        if viewport is None:
-            return
-
-        size = self.GetClientSize()
-        x_pos, y_pos, width, height = viewport
-        row_count = max(len(monitor_items), 1)
-        cycle_pitch = 20.0
-        row_pitch = 24.0
-        row_depth = 10.0
-        cycle_span = cycle_count * cycle_pitch
-        row_span = max(row_count - 1, 0) * row_pitch
-        camera_distance, far_plane = self.fit_3d_camera_distance(
-            width, height, cycle_span, row_span, row_depth
-        )
-        aspect = width / max(height, 1)
-
-        try:
-            GL.glViewport(x_pos, y_pos, width, height)
-            GL.glEnable(GL.GL_SCISSOR_TEST)
-            GL.glScissor(x_pos, y_pos, width, height)
-            GL.glClear(GL.GL_DEPTH_BUFFER_BIT)
-            GL.glEnable(GL.GL_DEPTH_TEST)
-            GL.glDepthFunc(GL.GL_LEQUAL)
-
-            GL.glMatrixMode(GL.GL_PROJECTION)
-            GL.glLoadIdentity()
-            GLU.gluPerspective(45.0, aspect, 10.0, far_plane + 600.0)
-
-            GL.glMatrixMode(GL.GL_MODELVIEW)
-            GL.glLoadIdentity()
-            GL.glTranslatef(
-                self.trace_3d_pan_x, self.trace_3d_pan_y,
-                -camera_distance * 1.08
-            )
-            GL.glRotatef(self.trace_3d_rotate_x, 1.0, 0.0, 0.0)
-            GL.glRotatef(self.trace_3d_rotate_y, 0.0, 1.0, 0.0)
-            GL.glTranslatef(-cycle_span / 2, 0.0, row_span / 2)
-
-            self.configure_template_3d_lighting()
-            self.draw_template_3d_floor(
-                cycle_count, row_count, cycle_pitch, row_pitch, first_cycle
-            )
-
-            for index, monitor_item in enumerate(monitor_items):
-                (_, _), signal_list = monitor_item
-                z_pos = -index * row_pitch
-                visible_signals = self.visible_signal_window(
-                    signal_list, first_cycle, cycle_count, use_blank
-                )
-                self.draw_template_3d_monitor_row(
-                    visible_signals, z_pos, cycle_pitch, row_depth
-                )
-        finally:
-            GL.glLineWidth(1.0)
-            self.configure_2d_projection(size)
-
     def configure_3d_lighting(self):
         """Configure simple lighting for raised signal blocks."""
         GL.glEnable(GL.GL_COLOR_MATERIAL)
@@ -1470,130 +1400,6 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         GL.glLightfv(GL.GL_LIGHT0, GL.GL_DIFFUSE, [0.78, 0.78, 0.78, 1.0])
         GL.glLightfv(GL.GL_LIGHT0, GL.GL_POSITION, [0.0, 80.0, 120.0, 0.0])
         GL.glColorMaterial(GL.GL_FRONT, GL.GL_AMBIENT_AND_DIFFUSE)
-
-    def configure_template_3d_lighting(self):
-        """Configure the darker two-light look from the gui_3D.py template."""
-        GL.glEnable(GL.GL_COLOR_MATERIAL)
-        GL.glEnable(GL.GL_CULL_FACE)
-        GL.glEnable(GL.GL_LIGHTING)
-        GL.glEnable(GL.GL_LIGHT0)
-        GL.glEnable(GL.GL_LIGHT1)
-        GL.glLightfv(GL.GL_LIGHT0, GL.GL_AMBIENT, [0.0, 0.0, 0.0, 1.0])
-        GL.glLightfv(GL.GL_LIGHT0, GL.GL_DIFFUSE, [0.75, 0.75, 0.75, 1.0])
-        GL.glLightfv(GL.GL_LIGHT0, GL.GL_POSITION, [1.0, 1.0, 1.0, 0.0])
-        GL.glLightfv(GL.GL_LIGHT1, GL.GL_AMBIENT, [0.0, 0.0, 0.0, 1.0])
-        GL.glLightfv(GL.GL_LIGHT1, GL.GL_DIFFUSE, [0.5, 0.5, 0.5, 1.0])
-        GL.glLightfv(GL.GL_LIGHT1, GL.GL_POSITION, [0.0, 0.0, 1.0, 0.0])
-        GL.glColorMaterial(GL.GL_FRONT, GL.GL_AMBIENT_AND_DIFFUSE)
-
-    def draw_template_3d_floor(self, cycle_count, row_count, cycle_pitch,
-                               row_pitch, first_cycle):
-        """Draw a sparse white-on-black floor matching the 3D template feel."""
-        x_end = cycle_count * cycle_pitch
-        z_top = row_pitch * 0.55
-        z_bottom = -(row_count - 1) * row_pitch - row_pitch * 0.55
-
-        GL.glDisable(GL.GL_LIGHTING)
-        GL.glLineWidth(1.0)
-        GL.glBegin(GL.GL_LINES)
-        for cycle in range(cycle_count + 1):
-            if (first_cycle + cycle) % 5 == 0:
-                self.set_colour(0.62, 0.62, 0.62)
-            else:
-                self.set_colour(0.22, 0.22, 0.22)
-            x_pos = cycle * cycle_pitch
-            GL.glVertex3f(x_pos, -6.0, z_top)
-            GL.glVertex3f(x_pos, -6.0, z_bottom)
-
-        for row in range(row_count):
-            z_pos = -row * row_pitch
-            self.set_colour(0.42, 0.42, 0.42)
-            GL.glVertex3f(0.0, -6.0, z_pos)
-            GL.glVertex3f(x_end, -6.0, z_pos)
-        GL.glEnd()
-
-    def draw_template_3d_monitor_row(self, signals, z_pos, cycle_pitch,
-                                     row_depth):
-        """Draw one row with beige cuboids like the original template."""
-        for index, signal in enumerate(signals):
-            x_center = index * cycle_pitch + cycle_pitch / 2
-            height = self.template_signal_height_3d(signal)
-            if height is None:
-                self.draw_template_blank_segment(
-                    index * cycle_pitch, (index + 1) * cycle_pitch, z_pos
-                )
-                continue
-            self.set_colour(*self.template_signal_colour_3d(signal))
-            self.draw_template_3d_cuboid(
-                x_center, z_pos, cycle_pitch * 0.30, row_depth, height
-            )
-
-    def template_signal_height_3d(self, signal):
-        """Map simulator levels to the short/tall template block heights."""
-        if signal in [self.devices.HIGH, self.devices.RISING]:
-            return 11.0
-        if signal in [self.devices.LOW, self.devices.FALLING]:
-            return 1.0
-        return None
-
-    def template_signal_colour_3d(self, signal):
-        """Return the beige/orange template colours for signal blocks."""
-        if signal in [self.devices.HIGH, self.devices.RISING]:
-            return 1.0, 0.70, 0.50
-        return 0.64, 0.42, 0.28
-
-    def draw_template_blank_segment(self, x_start, x_end, z_pos):
-        """Draw a faint line where the template style has no signal data."""
-        GL.glDisable(GL.GL_LIGHTING)
-        self.set_colour(0.55, 0.55, 0.55)
-        GL.glBegin(GL.GL_LINES)
-        GL.glVertex3f(x_start + 2.0, -1.0, z_pos)
-        GL.glVertex3f(x_end - 2.0, -1.0, z_pos)
-        GL.glEnd()
-
-    def draw_template_3d_cuboid(self, x_pos, z_pos, half_width, half_depth,
-                                height):
-        """Draw a cuboid with the same base level as the old 3D template."""
-        GL.glEnable(GL.GL_LIGHTING)
-        base_y = -6.0
-        top_y = base_y + height
-        GL.glBegin(GL.GL_QUADS)
-        GL.glNormal3f(0.0, -1.0, 0.0)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos + half_depth)
-
-        GL.glNormal3f(0.0, 1.0, 0.0)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos + half_depth)
-
-        GL.glNormal3f(-1.0, 0.0, 0.0)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos + half_depth)
-
-        GL.glNormal3f(1.0, 0.0, 0.0)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos + half_depth)
-
-        GL.glNormal3f(0.0, 0.0, -1.0)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos - half_depth)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos - half_depth)
-
-        GL.glNormal3f(0.0, 0.0, 1.0)
-        GL.glVertex3f(x_pos - half_width, top_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos - half_width, base_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos + half_width, base_y, z_pos + half_depth)
-        GL.glVertex3f(x_pos + half_width, top_y, z_pos + half_depth)
-        GL.glEnd()
 
     def draw_3d_floor(self, cycle_count, row_count, cycle_pitch, row_pitch,
                       first_cycle):
@@ -1780,26 +1586,44 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             GL.glVertex2f(plot_x + width, plot_y + row)
         GL.glEnd()
 
-    def scope_row_gap(self, plot_height, count):
-        """Return a row spacing that spreads waveforms over the plot height.
+    def scope_visible_rows(self, plot_height, total_rows):
+        """Return how many monitor rows fit at the current vertical zoom.
 
-        Few monitors in a tall oscilloscope would otherwise bunch up against
-        the top edge, so the rows are distributed down the plot and the gap is
-        capped to keep each waveform comfortably close to its neighbour.
+        A smaller ``scope_row_zoom`` packs more signals into the plot so the
+        whole monitor set can be seen at once; the per-row slot never drops
+        below a readable floor, which also bounds how many rows are drawn.
+        """
+        zoom = getattr(self, "scope_row_zoom", 1.0)
+        slot_height = max(self.row_height * zoom, self.min_row_band)
+        visible = max(1, int(plot_height // slot_height))
+        return min(visible, total_rows)
+
+    def scope_row_gap(self, plot_height, count):
+        """Return the spacing that spreads ``count`` rows over the plot.
+
+        The visible rows always fill the plot height; the gap is floored so
+        compressed rows stay legible and capped so a handful of monitors do
+        not drift far apart.
         """
         gap = plot_height / max(count, 1)
-        return self.clamp(gap, self.row_height, 88)
+        return self.clamp(gap, self.min_row_band, 88.0)
+
+    def scope_row_amplitude(self, row_gap):
+        """Return a waveform half-height that fits inside one row's band."""
+        return self.clamp(row_gap * 0.42, 4.0, self.high_offset)
 
     def draw_scope_rows(self, label_x, plot_x, plot_y, plot_height,
                         monitor_items, first_cycle, cycle_count,
                         first_row):
         """Draw all monitored signal names and waveforms."""
         row_gap = self.scope_row_gap(plot_height, len(monitor_items))
+        high_off = self.scope_row_amplitude(row_gap)
+        low_off = self.low_offset * high_off / self.high_offset
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), signal_list = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
-            row_mid = plot_y + plot_height - 18 - index * row_gap
-            row_base = row_mid - self.high_offset / 2
+            row_mid = plot_y + plot_height - row_gap * 0.5 - index * row_gap
+            row_base = row_mid - high_off / 2
 
             colour = self.trace_colour_for_monitor(
                 device_id, output_id,
@@ -1808,18 +1632,21 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.set_colour(*colour)
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             self.draw_signal_level_scale(
-                plot_x, plot_y, plot_height, row_base, row_gap
+                plot_x, plot_y, plot_height, row_base, row_gap,
+                high_off, low_off
             )
             visible_signals = signal_list[
                 first_cycle:first_cycle + cycle_count
             ]
-            self.draw_digital_signal(plot_x, row_base, visible_signals, colour)
+            self.draw_digital_signal(
+                plot_x, row_base, visible_signals, colour, high_off, low_off
+            )
 
     def draw_signal_level_scale(self, plot_x, plot_y, plot_height, row_base,
-                                row_gap):
+                                row_gap, high_off, low_off):
         """Draw 1/0 scale labels and guide lines for one waveform row."""
-        high_y = row_base + self.high_offset
-        low_y = row_base + self.low_offset
+        high_y = row_base + high_off
+        low_y = row_base + low_off
 
         self.set_colour(*self.theme_colour("level_mark"))
         GL.glBegin(GL.GL_LINES)
@@ -1848,12 +1675,14 @@ class MyGLCanvas(wxcanvas.GLCanvas):
                               monitor_items, cycle_count, first_row):
         """Draw aligned monitor rows before any signal data is recorded."""
         row_gap = self.scope_row_gap(plot_height, len(monitor_items))
+        high_off = self.scope_row_amplitude(row_gap)
+        low_off = self.low_offset * high_off / self.high_offset
         blank_signals = [self.devices.BLANK] * cycle_count
         for index, monitor_item in enumerate(monitor_items):
             (device_id, output_id), _ = monitor_item
             name = self.devices.get_signal_name(device_id, output_id)
-            row_mid = plot_y + plot_height - 18 - index * row_gap
-            row_base = row_mid - self.high_offset / 2
+            row_mid = plot_y + plot_height - row_gap * 0.5 - index * row_gap
+            row_base = row_mid - high_off / 2
 
             colour = self.trace_colour_for_monitor(
                 device_id, output_id,
@@ -1861,14 +1690,18 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             )
             self.render_text(name, label_x + 14, row_mid - 5, colour)
             self.draw_signal_level_scale(
-                plot_x, plot_y, plot_height, row_base, row_gap
+                plot_x, plot_y, plot_height, row_base, row_gap,
+                high_off, low_off
             )
-            self.draw_digital_signal(plot_x, row_base, blank_signals, colour)
+            self.draw_digital_signal(
+                plot_x, row_base, blank_signals, colour, high_off, low_off
+            )
 
-    def draw_digital_signal(self, plot_x, row_base, signal_list, colour):
+    def draw_digital_signal(self, plot_x, row_base, signal_list, colour,
+                            high_off, low_off):
         """Draw one digital signal as a continuous square waveform."""
-        high_y = row_base + self.high_offset
-        low_y = row_base + self.low_offset
+        high_y = row_base + high_off
+        low_y = row_base + low_off
         previous_y = None
 
         for index, signal in enumerate(signal_list):
@@ -1876,7 +1709,8 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             x_end = x_start + self.cycle_width
 
             if signal == self.devices.BLANK:
-                self.draw_blank_signal(x_start, x_end, row_base)
+                self.draw_blank_signal(x_start, x_end, row_base, high_off,
+                                       low_off)
                 previous_y = None
                 continue
 
@@ -1945,9 +1779,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             return (0.48, 0.30, 0.68)
         return self.trace_colours[index % len(self.trace_colours)]
 
-    def draw_blank_signal(self, x_start, x_end, row_base):
+    def draw_blank_signal(self, x_start, x_end, row_base, high_off, low_off):
         """Draw a blank signal interval for monitors added mid-run."""
-        mid_y = row_base + (self.high_offset + self.low_offset) / 2
+        mid_y = row_base + (high_off + low_off) / 2
         dash_width = 5
         self.set_colour(*self.theme_colour("blank_signal"))
         GL.glBegin(GL.GL_LINES)
@@ -2248,7 +2082,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.trace_3d_drag_active = False
 
         wheel_rotation = event.GetWheelRotation()
-        if wheel_rotation != 0 and self.scroll_circuit_view(
+        if wheel_rotation != 0 and self.wheel_circuit(
             object_x, object_y, wheel_rotation
         ):
             self.Refresh()
@@ -2260,7 +2094,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.Refresh()
             return
 
-        if wheel_rotation != 0 and self.scroll_scope_rows(
+        if wheel_rotation != 0 and self.wheel_scope(
             object_x, object_y, wheel_rotation
         ):
             self.Refresh()
@@ -2381,6 +2215,17 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             fraction = (thumb_x - track_x) / usable
             self.circuit_scroll_x = fraction * max_scroll_x
 
+    def wheel_circuit(self, x_pos, y_pos, wheel_rotation):
+        """Zoom the circuit overview, or scroll it with Shift held."""
+        if not self.point_in_rect(x_pos, y_pos,
+                                  self.circuit_geometry.get("view")):
+            return False
+        if wx.GetKeyState(wx.WXK_SHIFT):
+            return self.scroll_circuit_view(x_pos, y_pos, wheel_rotation)
+        factor = 1.1 if wheel_rotation > 0 else 1.0 / 1.1
+        self.zoom_circuit(factor)
+        return True
+
     def scroll_circuit_view(self, x_pos, y_pos, wheel_rotation):
         """Scroll the circuit overview when the wheel is over it."""
         view = self.circuit_geometry.get("view")
@@ -2498,6 +2343,25 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.scope_first_row = self.clamp(
             self.scope_first_row + step, 0, max_first_row
         )
+        return True
+
+    def wheel_scope(self, x_pos, y_pos, wheel_rotation):
+        """Zoom 2D scope signals vertically, or the time axis with Shift.
+
+        Plain wheel changes how many monitor rows share the height so the
+        whole set of outputs can be brought into view at once; Shift+wheel
+        zooms the time axis instead.
+        """
+        if self.trace_display_3d:
+            return False
+        if not self.point_in_rect(x_pos, y_pos,
+                                  self.scope_geometry.get("plot")):
+            return False
+        factor = 1.12 if wheel_rotation > 0 else 1.0 / 1.12
+        if wx.GetKeyState(wx.WXK_SHIFT):
+            self.zoom_scope(factor)
+        else:
+            self.zoom_scope_rows(factor)
         return True
 
     def point_in_rect(self, x_pos, y_pos, rect):
@@ -2637,9 +2501,8 @@ class Gui(wx.Frame):
         text_controls = [
             self.cycles_label, self.speed_label, self.switch_label,
             self.add_monitor_label, self.remove_monitor_label,
-            self.circuit_zoom_label, self.scope_zoom_label,
-            self.trace_display_label, self.trace_art_style_label,
-            self.maximise_label,
+            self.fit_label,
+            self.trace_display_label, self.maximise_label,
             self.switch_box, self.monitor_box,
             self.view_box,
             self.readings_box, self.log_box,
@@ -2650,17 +2513,14 @@ class Gui(wx.Frame):
             self.export_circuit_button, self.export_scope_button,
             self.settings_button, self.help_button, self.set_switch_button,
             self.add_monitor_button, self.remove_monitor_button,
-            self.reset_view_button, self.circuit_zoom_in_button,
-            self.circuit_zoom_out_button, self.circuit_fit_button,
-            self.scope_zoom_in_button, self.scope_zoom_out_button,
+            self.reset_view_button, self.circuit_fit_button,
             self.scope_fit_button, self.trace_display_button,
             self.maximise_circuit_button, self.maximise_scope_button,
         ]
         fields = [
             self.cycles_spin, self.speed_slider, self.switch_choice,
             self.switch_value, self.add_monitor_choice,
-            self.remove_monitor_choice, self.trace_art_style_choice,
-            self.readings_list, self.log_text,
+            self.remove_monitor_choice, self.readings_list, self.log_text,
         ]
 
         for control in text_controls:
@@ -2800,33 +2660,19 @@ class Gui(wx.Frame):
         self.reset_view_button = wx.Button(
             self, wx.ID_ANY, self.t("reset_view")
         )
-        self.circuit_zoom_label = wx.StaticText(
-            self, wx.ID_ANY, self.t("circuit_zoom")
-        )
-        self.circuit_zoom_in_button = wx.Button(self, wx.ID_ANY, "+")
-        self.circuit_zoom_out_button = wx.Button(self, wx.ID_ANY, "-")
+        self.fit_label = wx.StaticText(self, wx.ID_ANY, self.t("fit"))
         self.circuit_fit_button = wx.Button(
-            self, wx.ID_ANY, self.t("fit")
+            self, wx.ID_ANY, self.t("maximise_circuit")
         )
-        self.scope_zoom_label = wx.StaticText(
-            self, wx.ID_ANY, self.t("scope_zoom")
+        self.scope_fit_button = wx.Button(
+            self, wx.ID_ANY, self.t("maximise_scope")
         )
-        self.scope_zoom_in_button = wx.Button(self, wx.ID_ANY, "+")
-        self.scope_zoom_out_button = wx.Button(self, wx.ID_ANY, "-")
-        self.scope_fit_button = wx.Button(self, wx.ID_ANY, self.t("fit"))
         self.trace_display_label = wx.StaticText(
             self, wx.ID_ANY, self.t("trace_display")
         )
         self.trace_display_button = wx.ToggleButton(
             self, wx.ID_ANY, self.t("trace_display_3d")
         )
-        self.trace_art_style_label = wx.StaticText(
-            self, wx.ID_ANY, self.t("trace_art_style")
-        )
-        self.trace_art_style_choice = wx.Choice(
-            self, wx.ID_ANY, choices=self.trace_art_style_labels()
-        )
-        self.trace_art_style_choice.SetSelection(0)
         self.maximise_label = wx.StaticText(
             self, wx.ID_ANY, self.t("maximise")
         )
@@ -2917,35 +2763,20 @@ class Gui(wx.Frame):
                         wx.EXPAND | wx.ALL, 6)
         monitor_box.Add(self.reset_view_button, 0, wx.EXPAND | wx.ALL, 6)
 
-        circuit_zoom_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        circuit_zoom_sizer.Add(self.circuit_zoom_out_button, 1,
-                               wx.EXPAND | wx.RIGHT, 4)
-        circuit_zoom_sizer.Add(self.circuit_zoom_in_button, 1,
-                               wx.EXPAND | wx.RIGHT, 4)
-        circuit_zoom_sizer.Add(self.circuit_fit_button, 1, wx.EXPAND)
-        scope_zoom_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        scope_zoom_sizer.Add(self.scope_zoom_out_button, 1,
-                             wx.EXPAND | wx.RIGHT, 4)
-        scope_zoom_sizer.Add(self.scope_zoom_in_button, 1,
-                             wx.EXPAND | wx.RIGHT, 4)
-        scope_zoom_sizer.Add(self.scope_fit_button, 1, wx.EXPAND)
         maximise_sizer = wx.BoxSizer(wx.HORIZONTAL)
         maximise_sizer.Add(self.maximise_circuit_button, 1,
                            wx.EXPAND | wx.RIGHT, 4)
         maximise_sizer.Add(self.maximise_scope_button, 1, wx.EXPAND)
+        fit_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        fit_sizer.Add(self.circuit_fit_button, 1, wx.EXPAND | wx.RIGHT, 4)
+        fit_sizer.Add(self.scope_fit_button, 1, wx.EXPAND)
         view_box.Add(self.maximise_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
         view_box.Add(maximise_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        view_box.Add(self.circuit_zoom_label, 0,
-                     wx.TOP | wx.LEFT | wx.RIGHT, 6)
-        view_box.Add(circuit_zoom_sizer, 0, wx.EXPAND | wx.ALL, 6)
-        view_box.Add(self.scope_zoom_label, 0, wx.LEFT | wx.RIGHT, 6)
-        view_box.Add(scope_zoom_sizer, 0, wx.EXPAND | wx.ALL, 6)
+        view_box.Add(self.fit_label, 0, wx.TOP | wx.LEFT | wx.RIGHT, 6)
+        view_box.Add(fit_sizer, 0, wx.EXPAND | wx.ALL, 6)
         view_box.Add(self.trace_display_label, 0,
                      wx.LEFT | wx.RIGHT, 6)
         view_box.Add(self.trace_display_button, 0, wx.EXPAND | wx.ALL, 6)
-        view_box.Add(self.trace_art_style_label, 0,
-                     wx.LEFT | wx.RIGHT, 6)
-        view_box.Add(self.trace_art_style_choice, 0, wx.EXPAND | wx.ALL, 6)
 
         readings_box.Add(self.readings_list, 1, wx.EXPAND | wx.ALL, 6)
         log_box.Add(self.log_text, 1, wx.EXPAND | wx.ALL, 6)
@@ -2987,12 +2818,8 @@ class Gui(wx.Frame):
         for control in [
             self.maximise_label, self.maximise_circuit_button,
             self.maximise_scope_button,
-            self.circuit_zoom_label, self.circuit_zoom_in_button,
-            self.circuit_zoom_out_button, self.circuit_fit_button,
-            self.scope_zoom_label, self.scope_zoom_in_button,
-            self.scope_zoom_out_button, self.scope_fit_button,
+            self.fit_label, self.circuit_fit_button, self.scope_fit_button,
             self.trace_display_label, self.trace_display_button,
-            self.trace_art_style_label, self.trace_art_style_choice,
         ]:
             control.Reparent(self.view_box)
 
@@ -3028,29 +2855,14 @@ class Gui(wx.Frame):
             wx.EVT_BUTTON, self.on_remove_monitor_button
         )
         self.reset_view_button.Bind(wx.EVT_BUTTON, self.on_reset_view_button)
-        self.circuit_zoom_in_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_circuit_zoom(1.25)
-        )
-        self.circuit_zoom_out_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_circuit_zoom(0.8)
-        )
         self.circuit_fit_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_circuit_fit()
-        )
-        self.scope_zoom_in_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_scope_zoom(1.25)
-        )
-        self.scope_zoom_out_button.Bind(
-            wx.EVT_BUTTON, lambda event: self.on_scope_zoom(0.8)
         )
         self.scope_fit_button.Bind(
             wx.EVT_BUTTON, lambda event: self.on_scope_fit()
         )
         self.trace_display_button.Bind(
             wx.EVT_TOGGLEBUTTON, self.on_trace_display_button
-        )
-        self.trace_art_style_choice.Bind(
-            wx.EVT_CHOICE, self.on_trace_art_style_choice
         )
         self.maximise_circuit_button.Bind(
             wx.EVT_TOGGLEBUTTON, self.on_maximise_circuit_button
@@ -3059,37 +2871,13 @@ class Gui(wx.Frame):
             wx.EVT_TOGGLEBUTTON, self.on_maximise_scope_button
         )
 
-    def trace_art_style_labels(self):
-        """Return translated labels for the 3D trace style selector."""
-        return [self.t("trace_art_modern"), self.t("trace_art_template")]
-
-    def selected_trace_art_style(self):
-        """Return the trace style represented by the current choice."""
-        if self.trace_art_style_choice.GetSelection() == 1:
-            return "template"
-        return "modern"
-
-    def set_trace_art_style_choice(self, style):
-        """Synchronise the style choice control with a style key."""
-        self.trace_art_style_choice.SetSelection(1 if style == "template" else 0)
-
-    def on_circuit_zoom(self, factor):
-        """Zoom the circuit overview and refresh the canvas."""
-        self.canvas.zoom_circuit(factor)
-        self.set_status(self.t("circuit_zoom_updated"))
-
     def on_circuit_fit(self):
-        """Fit more of the circuit overview into the viewport."""
+        """Fit the whole circuit overview into the viewport."""
         self.canvas.fit_circuit()
         self.set_status(self.t("circuit_overview_fitted"))
 
-    def on_scope_zoom(self, factor):
-        """Zoom the oscilloscope time axis and refresh the canvas."""
-        self.canvas.zoom_scope(factor)
-        self.set_status(self.t("scope_zoom_updated"))
-
     def on_scope_fit(self):
-        """Fit more oscilloscope cycles into the viewport."""
+        """Fit every monitor row and cycle into the oscilloscope."""
         self.canvas.fit_scope()
         self.set_status(self.t("scope_fitted"))
 
@@ -3101,18 +2889,6 @@ class Gui(wx.Frame):
             self.set_status(self.t("trace_display_3d_enabled"))
         else:
             self.set_status(self.t("trace_display_2d_enabled"))
-
-    def on_trace_art_style_choice(self, event):
-        """Switch the 3D trace art style used by the oscilloscope."""
-        style = self.selected_trace_art_style()
-        self.canvas.set_trace_3d_art_style(style)
-        if not self.trace_display_button.GetValue():
-            self.trace_display_button.SetValue(True)
-            self.canvas.set_trace_display_3d(True)
-        if style == "template":
-            self.set_status(self.t("trace_art_template_enabled"))
-        else:
-            self.set_status(self.t("trace_art_modern_enabled"))
 
     def on_maximise_circuit_button(self, event):
         """Maximise the circuit overview, or restore the split view."""
@@ -3277,16 +3053,11 @@ class Gui(wx.Frame):
         self.remove_monitor_label.SetLabel(self.t("current_monitors"))
         self.remove_monitor_button.SetLabel(self.t("remove_monitor"))
         self.reset_view_button.SetLabel(self.t("reset_view"))
-        self.circuit_zoom_label.SetLabel(self.t("circuit_zoom"))
-        self.circuit_fit_button.SetLabel(self.t("fit"))
-        self.scope_zoom_label.SetLabel(self.t("scope_zoom"))
-        self.scope_fit_button.SetLabel(self.t("fit"))
+        self.fit_label.SetLabel(self.t("fit"))
+        self.circuit_fit_button.SetLabel(self.t("maximise_circuit"))
+        self.scope_fit_button.SetLabel(self.t("maximise_scope"))
         self.trace_display_label.SetLabel(self.t("trace_display"))
         self.trace_display_button.SetLabel(self.t("trace_display_3d"))
-        self.trace_art_style_label.SetLabel(self.t("trace_art_style"))
-        style = self.canvas.trace_3d_art_style
-        self.trace_art_style_choice.SetItems(self.trace_art_style_labels())
-        self.set_trace_art_style_choice(style)
         self.maximise_label.SetLabel(self.t("maximise"))
         self.maximise_circuit_button.SetLabel(self.t("maximise_circuit"))
         self.maximise_scope_button.SetLabel(self.t("maximise_scope"))
