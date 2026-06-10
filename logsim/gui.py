@@ -10,6 +10,7 @@ import os
 import shutil
 import zlib
 
+import display_backend  # noqa: F401  (sets GDK_BACKEND before wx loads)
 import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLU, GLUT
@@ -120,6 +121,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         self.circuit_3d_drag_active = False
         self.circuit_3d_wire_base = 10.0
         self.circuit_3d_wire_band = 56.0
+        self.hover_3d_name = None
 
         self.left_margin = 150
         self.canvas_horizontal_padding = 36
@@ -867,6 +869,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         finally:
             GL.glLineWidth(1.0)
             self.configure_2d_projection(size)
+        self.draw_3d_axis_gizmo(
+            view_bounds[0] + 40, view_bounds[1] + 42, 24,
+            self.circuit_3d_rotate_x, self.circuit_3d_rotate_y
+        )
 
     def store_circuit_3d_geometry(self, viewport, camera_distance, layout):
         """Record 3D camera framing for zoom-to-cursor and the scrollbars."""
@@ -1651,6 +1657,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
 
     def draw_oscilloscope(self, bounds, monitor_items):
         """Draw monitor signals in a floating oscilloscope window."""
+        self.scope_geometry.pop("rows_3d", None)
         x_pos, y_pos, width, height = bounds
 
         margin_x = 12 if width > 520 else 6
@@ -1972,6 +1979,69 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         z_final = y_pos * sin_x + z_rot * cos_x
         return x_rot, y_rot, z_final
 
+    def axis_gizmo_axes(self, rotate_x_deg, rotate_y_deg):
+        """Return screen directions for the X/Y/Z axes at a camera angle.
+
+        Each entry is ``(label, dx, dy, depth)`` where ``(dx, dy)`` is the
+        on-screen direction of that model axis (so the indicator rotates
+        exactly with the scene) and ``depth`` increases toward the viewer.
+        Entries are sorted farthest first so nearer arrows draw on top.
+        """
+        rotate_x = math.radians(rotate_x_deg)
+        rotate_y = math.radians(rotate_y_deg)
+        axes = []
+        for label, axis in (
+            ("X", (1.0, 0.0, 0.0)),
+            ("Y", (0.0, 1.0, 0.0)),
+            ("Z", (0.0, 0.0, 1.0)),
+        ):
+            dx, dy, depth = self.rotate_scene_corner(
+                axis[0], axis[1], axis[2], rotate_x, rotate_y
+            )
+            axes.append((label, dx, dy, depth))
+        axes.sort(key=lambda entry: entry[3])
+        return axes
+
+    def draw_3d_axis_gizmo(self, centre_x, centre_y, radius,
+                           rotate_x_deg, rotate_y_deg):
+        """Draw a small rotating X/Y/Z axis indicator for a 3D view."""
+        colours = {
+            "X": (0.78, 0.16, 0.16),
+            "Y": (0.18, 0.30, 0.86),
+            "Z": (0.20, 0.62, 0.28),
+        }
+        for label, dx, dy, _ in self.axis_gizmo_axes(
+            rotate_x_deg, rotate_y_deg
+        ):
+            tip_x = centre_x + dx * radius
+            tip_y = centre_y + dy * radius
+            length = math.hypot(tip_x - centre_x, tip_y - centre_y)
+            self.set_colour(*colours[label])
+            GL.glLineWidth(2.4)
+            GL.glBegin(GL.GL_LINES)
+            GL.glVertex2f(centre_x, centre_y)
+            GL.glVertex2f(tip_x, tip_y)
+            GL.glEnd()
+            if length > 1e-6:
+                unit_x = (tip_x - centre_x) / length
+                unit_y = (tip_y - centre_y) / length
+            else:
+                # Axis points at the viewer: keep a readable stub label.
+                unit_x, unit_y = 0.0, 1.0
+            GL.glBegin(GL.GL_TRIANGLES)
+            GL.glVertex2f(tip_x + unit_x * 7, tip_y + unit_y * 7)
+            GL.glVertex2f(tip_x - unit_y * 3.2, tip_y + unit_x * 3.2)
+            GL.glVertex2f(tip_x + unit_y * 3.2, tip_y - unit_x * 3.2)
+            GL.glEnd()
+            self.render_text(
+                label, tip_x + unit_x * 12 - 3, tip_y + unit_y * 12 - 5,
+                colours[label]
+            )
+        GL.glLineWidth(1.0)
+        self.draw_circle(
+            centre_x, centre_y, 2.4, self.theme_colour("text")
+        )
+
     def draw_3d_trace_view(self, plot_x, plot_y, plot_width, plot_height,
                            monitor_items, first_cycle, cycle_count,
                            first_row, use_blank=False):
@@ -2001,6 +2071,10 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.trace_3d_rotate_x, self.trace_3d_rotate_y, self.trace_3d_zoom
         )
         aspect = width / max(height, 1)
+        self.scope_geometry["rows_3d"] = self.build_3d_scope_row_hits(
+            viewport, monitor_items, cycle_span, row_span, row_pitch,
+            camera_distance, aspect
+        )
 
         try:
             GL.glViewport(x_pos, y_pos, width, height)
@@ -2049,6 +2123,111 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         finally:
             GL.glLineWidth(1.0)
             self.configure_2d_projection(size)
+        self.draw_3d_axis_gizmo(
+            plot_x + 40, plot_y + 42, 24,
+            self.trace_3d_rotate_x, self.trace_3d_rotate_y
+        )
+
+    def build_3d_scope_row_hits(self, viewport, monitor_items, cycle_span,
+                                row_span, row_pitch, camera_distance,
+                                aspect):
+        """Return projected screen segments for each visible 3D scope row.
+
+        Each entry carries the signal name and the on-screen endpoints of
+        that monitor row's centre line, so hovering the mouse over a 3D
+        trace can identify which signal it belongs to.
+        """
+        camera = {
+            "viewport": viewport,
+            "distance": camera_distance,
+            "aspect": aspect,
+            "rotate_x": self.trace_3d_rotate_x,
+            "rotate_y": self.trace_3d_rotate_y,
+            "pan_x": self.trace_3d_pan_x,
+            "pan_y": self.trace_3d_pan_y,
+        }
+        rows = []
+        for index, monitor_item in enumerate(monitor_items):
+            (device_id, output_id), _ = monitor_item
+            name = self.devices.get_signal_name(device_id, output_id)
+            z_pos = -index * row_pitch + row_span / 2
+            start = self.project_3d_trace_point(
+                -cycle_span / 2, 0.0, z_pos, camera
+            )
+            end = self.project_3d_trace_point(
+                cycle_span / 2, 0.0, z_pos, camera
+            )
+            if start is not None and end is not None:
+                rows.append({"name": name, "start": start, "end": end})
+        return rows
+
+    def project_3d_trace_point(self, x_pos, y_pos, z_pos, camera):
+        """Project a 3D trace-scene point to canvas coordinates.
+
+        Mirrors the GL camera exactly (rotate, pan, perspective) so the
+        result lands where the point is actually drawn; returns ``None``
+        for points at or behind the camera plane.
+        """
+        view_x, view_y, view_width, view_height = camera["viewport"]
+        rotated = self.rotate_scene_corner(
+            x_pos, y_pos, z_pos,
+            math.radians(camera["rotate_x"]),
+            math.radians(camera["rotate_y"]),
+        )
+        eye_x = rotated[0] + camera["pan_x"]
+        eye_y = rotated[1] + camera["pan_y"]
+        eye_z = rotated[2] - camera["distance"]
+        if eye_z >= -1.0:
+            return None
+        tan_y = math.tan(math.radians(camera.get("fov_y", 35.0) / 2.0))
+        tan_x = tan_y * camera["aspect"]
+        ndc_x = eye_x / (-eye_z * tan_x)
+        ndc_y = eye_y / (-eye_z * tan_y)
+        pixel_x = view_x + (ndc_x + 1.0) / 2.0 * view_width
+        pixel_y = view_y + (ndc_y + 1.0) / 2.0 * view_height
+        return (
+            (pixel_x - self.pan_x) / self.zoom,
+            (pixel_y - self.pan_y) / self.zoom,
+        )
+
+    def pick_3d_scope_row(self, x_pos, y_pos, max_distance=14.0):
+        """Return the signal name of the 3D scope row under the cursor."""
+        best_name = None
+        best_distance = max_distance
+        for row in self.scope_geometry.get("rows_3d") or []:
+            distance = self.point_segment_distance(
+                x_pos, y_pos,
+                row["start"][0], row["start"][1],
+                row["end"][0], row["end"][1],
+            )
+            if distance < best_distance:
+                best_distance = distance
+                best_name = row["name"]
+        return best_name
+
+    def point_segment_distance(self, px, py, ax, ay, bx, by):
+        """Return the distance from a point to a 2D line segment."""
+        dx = bx - ax
+        dy = by - ay
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 0.0:
+            return math.hypot(px - ax, py - ay)
+        t = self.clamp(((px - ax) * dx + (py - ay) * dy) / length_sq, 0, 1)
+        return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+    def update_3d_hover(self, x_pos, y_pos):
+        """Show the hovered 3D trace's signal name as a tooltip."""
+        name = None
+        if self.trace_display_3d and self.point_in_rect(
+            x_pos, y_pos, self.scope_geometry.get("plot")
+        ):
+            name = self.pick_3d_scope_row(x_pos, y_pos)
+        if name != self.hover_3d_name:
+            self.hover_3d_name = name
+            if name:
+                self.SetToolTip(name)
+            else:
+                self.UnsetToolTip()
 
     def configure_3d_lighting(self):
         """Configure simple lighting for raised signal blocks."""
@@ -2461,6 +2640,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             "plot": (plot_x, plot_y, plot_width, plot_height),
             "max_first_cycle": max(max_cycles - cycle_count, 0),
             "max_first_row": max(total_rows - visible_rows, 0),
+            # Keep the 3D hover rows stored by draw_3d_trace_view earlier
+            # in this same frame.
+            "rows_3d": self.scope_geometry.get("rows_3d"),
         }
 
         vertical_track = (right_x, plot_y, 10, plot_height)
@@ -2738,6 +2920,9 @@ class MyGLCanvas(wxcanvas.GLCanvas):
             self.scope_drag_mode = None
             self.trace_3d_drag_active = False
             self.circuit_3d_drag_active = False
+
+        if event.Moving():
+            self.update_3d_hover(object_x, object_y)
 
         wheel_rotation = event.GetWheelRotation()
         if wheel_rotation != 0 and self.wheel_circuit(

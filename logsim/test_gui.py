@@ -142,6 +142,10 @@ def make_canvas(devices):
     """Create a MyGLCanvas instance without running wx initialisation."""
     canvas = MyGLCanvas.__new__(MyGLCanvas)
     canvas.devices = devices
+    canvas.zoom = 1.0
+    canvas.pan_x = 0
+    canvas.pan_y = 0
+    canvas.hover_3d_name = None
     canvas.default_cycle_width = 28
     canvas.cycle_width = canvas.default_cycle_width
     canvas.row_height = 34
@@ -667,3 +671,120 @@ def test_circuit_3d_scrollbar_drag_pans_camera():
     # Thumb dragged to the bottom frames the bottom of the scene.
     canvas.update_circuit_scroll_drag(track[0], track_y)
     assert canvas.circuit_3d_pan_y == 80.0
+
+
+def test_prefer_x11_backend_only_when_x_display_available():
+    """Test if the GTK backend default applies only on Linux with X."""
+    import display_backend
+
+    env = {"DISPLAY": ":0"}
+    assert display_backend.prefer_x11_backend(env, "linux") == "x11"
+    assert env["GDK_BACKEND"] == "x11"
+
+    # An explicit user choice is never overridden.
+    env = {"DISPLAY": ":0", "GDK_BACKEND": "wayland"}
+    assert display_backend.prefer_x11_backend(env, "linux") == "wayland"
+
+    # Pure-Wayland sessions (no X server) keep their native backend.
+    env = {"WAYLAND_DISPLAY": "wayland-0"}
+    assert display_backend.prefer_x11_backend(env, "linux") is None
+    assert "GDK_BACKEND" not in env
+
+    # Other platforms are untouched.
+    env = {"DISPLAY": ":0"}
+    assert display_backend.prefer_x11_backend(env, "win32") is None
+    assert "GDK_BACKEND" not in env
+
+
+def test_axis_gizmo_axes_track_camera_rotation():
+    """Test if the axis indicator directions follow the 3D camera."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    # Identity camera: X right, Y up, Z toward the viewer (drawn last).
+    axes = {label: (dx, dy, depth) for label, dx, dy, depth
+            in canvas.axis_gizmo_axes(0.0, 0.0)}
+    assert axes["X"][0] > 0.99 and abs(axes["X"][1]) < 1e-9
+    assert axes["Y"][1] > 0.99 and abs(axes["Y"][0]) < 1e-9
+    assert axes["Z"][2] > 0.99
+    assert canvas.axis_gizmo_axes(0.0, 0.0)[-1][0] == "Z"
+
+    # Yaw the camera 90 degrees: X swings toward the viewer, Z to the left.
+    axes = {label: (dx, dy, depth) for label, dx, dy, depth
+            in canvas.axis_gizmo_axes(0.0, -90.0)}
+    assert axes["X"][2] > 0.99
+    assert axes["Z"][0] < -0.99
+    # Y is unaffected by yaw alone.
+    assert axes["Y"][1] > 0.99
+
+
+def test_project_3d_trace_point_matches_camera_centre():
+    """Test if the trace projection puts the scene centre mid-viewport."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    camera = {
+        "viewport": (40, 30, 400, 300),
+        "distance": 500.0,
+        "aspect": 400 / 300,
+        "rotate_x": 28.0,
+        "rotate_y": -34.0,
+        "pan_x": 0.0,
+        "pan_y": 0.0,
+    }
+
+    centre = canvas.project_3d_trace_point(0.0, 0.0, 0.0, camera)
+
+    assert centre is not None
+    assert abs(centre[0] - (40 + 200)) < 1e-6
+    assert abs(centre[1] - (30 + 150)) < 1e-6
+
+    # A point on the +X axis lands right of centre under a level camera.
+    camera["rotate_x"] = 0.0
+    camera["rotate_y"] = 0.0
+    right = canvas.project_3d_trace_point(50.0, 0.0, 0.0, camera)
+    assert right[0] > 240 and abs(right[1] - 180) < 1e-6
+    # Points behind the camera are rejected rather than mirrored.
+    assert canvas.project_3d_trace_point(0.0, 0.0, 600.0, camera) is None
+
+
+def test_build_3d_scope_row_hits_supports_hover_picking():
+    """Test if 3D scope rows project to pickable named segments."""
+    devices = FakeDevices(
+        [fake_device("A"), fake_device("B"), fake_device("C")],
+        {"A": "SIG_A", "B": "SIG_B", "C": "SIG_C"},
+    )
+    canvas = make_canvas(devices)
+    canvas.trace_3d_pan_x = 0.0
+    canvas.trace_3d_pan_y = 0.0
+    canvas.trace_3d_rotate_x = 28.0
+    canvas.trace_3d_rotate_y = -34.0
+    monitor_items = [
+        (("A", None), []), (("B", None), []), (("C", None), []),
+    ]
+
+    rows = canvas.build_3d_scope_row_hits(
+        (0, 0, 480, 360), monitor_items, cycle_span=180.0, row_span=44.0,
+        row_pitch=22.0, camera_distance=420.0, aspect=480 / 360
+    )
+
+    assert [row["name"] for row in rows] == ["SIG_A", "SIG_B", "SIG_C"]
+    canvas.scope_geometry = {"rows_3d": rows}
+    for row in rows:
+        mid_x = (row["start"][0] + row["end"][0]) / 2
+        mid_y = (row["start"][1] + row["end"][1]) / 2
+        assert canvas.pick_3d_scope_row(mid_x, mid_y) == row["name"]
+    # Far from every row nothing is picked.
+    assert canvas.pick_3d_scope_row(-500.0, -500.0) is None
+
+
+def test_point_segment_distance_handles_interior_and_endpoints():
+    """Test if point-to-segment distance clamps to the segment ends."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    assert canvas.point_segment_distance(50, 10, 0, 10, 100, 10) == 0.0
+    assert canvas.point_segment_distance(50, 16, 0, 10, 100, 10) == 6.0
+    # Beyond an endpoint the distance is measured to that endpoint.
+    assert canvas.point_segment_distance(103, 14, 0, 10, 100, 10) == 5.0
+    # Degenerate zero-length segments behave like a point.
+    assert canvas.point_segment_distance(3, 4, 0, 0, 0, 0) == 5.0
