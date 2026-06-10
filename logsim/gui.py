@@ -8,6 +8,7 @@ OpenGL canvas and can be panned or zoomed with the mouse.
 import math
 import os
 import shutil
+import sys
 import zlib
 
 import display_backend  # noqa: F401  (sets GDK_BACKEND before wx loads)
@@ -3418,7 +3419,7 @@ class Gui(wx.Frame):
         ]
         buttons = [
             self.run_button, self.continue_button, self.step_button,
-            self.auto_run_button, self.help_button, self.set_switch_button,
+            self.auto_run_button, self.set_switch_button,
             self.add_monitor_button, self.remove_monitor_button,
             self.reset_view_button, self.circuit_fit_button,
             self.scope_fit_button, self.trace_display_button,
@@ -3526,7 +3527,6 @@ class Gui(wx.Frame):
         self.speed_slider = wx.Slider(
             self, wx.ID_ANY, value=5, minValue=1, maxValue=10
         )
-        self.help_button = wx.Button(self, wx.ID_ANY, self.t("help"))
         self.readings_list = wx.ListBox(self, wx.ID_ANY, size=(230, 160))
         self.log_entries = []
         self.log_text = wx.TextCtrl(
@@ -3627,6 +3627,9 @@ class Gui(wx.Frame):
         )
         self.log_box = wx.StaticBox(self.side_panel, label=self.t("log"))
         self.reparent_side_panel_controls()
+        self.match_control_widths(
+            [self.add_monitor_button, self.remove_monitor_button]
+        )
         switch_box = wx.StaticBoxSizer(self.switch_box, wx.VERTICAL)
         monitor_box = wx.StaticBoxSizer(self.monitor_box, wx.VERTICAL)
         view_box = wx.StaticBoxSizer(self.view_box, wx.VERTICAL)
@@ -3651,8 +3654,6 @@ class Gui(wx.Frame):
             self.speed_slider, 1,
             wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10
         )
-        run_toolbar_sizer.Add(self.help_button, 0,
-                              wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
 
         switch_row = wx.BoxSizer(wx.HORIZONTAL)
         switch_row.Add(self.switch_choice, 1,
@@ -3717,6 +3718,14 @@ class Gui(wx.Frame):
         root_sizer.Add(main_sizer, 1, wx.EXPAND)
         self.SetSizer(root_sizer)
 
+    def match_control_widths(self, controls):
+        """Give related controls one shared width so rows line up."""
+        for control in controls:
+            control.SetMinSize((-1, -1))
+        width = max(control.GetBestSize().width for control in controls)
+        for control in controls:
+            control.SetMinSize((width, -1))
+
     def reparent_side_panel_controls(self):
         """Make side-panel widgets children of their native group boxes."""
         for control in [
@@ -3756,7 +3765,6 @@ class Gui(wx.Frame):
         self.auto_run_button.Bind(wx.EVT_TOGGLEBUTTON,
                                   self.on_auto_run_button)
         self.speed_slider.Bind(wx.EVT_SLIDER, self.on_speed_slider)
-        self.help_button.Bind(wx.EVT_BUTTON, lambda event: self.on_help())
         self.set_switch_button.Bind(wx.EVT_BUTTON, self.on_set_switch_button)
         self.add_monitor_button.Bind(wx.EVT_BUTTON, self.on_add_monitor_button)
         self.remove_monitor_button.Bind(
@@ -3839,34 +3847,96 @@ class Gui(wx.Frame):
         self.set_status(self.t(messages[mode]))
 
     def on_menu(self, event):
-        """Handle menu events.
-
-        Handlers that open a dialog are deferred with ``wx.CallAfter`` so
-        the dialog opens only after the menu has fully closed; launching it
-        from inside the menu event can glitch the popup on some platforms.
-        """
+        """Handle menu events."""
         event_id = event.GetId()
         if event_id == wx.ID_EXIT:
             self.stop_auto_run()
             self.Close(True)
         elif event_id == wx.ID_OPEN:
-            wx.CallAfter(self.on_open_file)
+            self.defer_menu_action(self.on_open_file)
         elif event_id == wx.ID_SAVEAS:
-            wx.CallAfter(self.on_save_file)
+            self.defer_menu_action(self.on_save_file)
         elif event_id == int(self.export_circuit_menu_id):
-            wx.CallAfter(self.on_export_circuit)
+            self.defer_menu_action(self.on_export_circuit)
         elif event_id == int(self.export_scope_menu_id):
-            wx.CallAfter(self.on_export_scope)
+            self.defer_menu_action(self.on_export_scope)
         elif event_id == int(self.help_menu_id):
-            wx.CallAfter(self.on_help)
+            self.defer_menu_action(self.on_help)
         elif event_id == wx.ID_ABOUT:
-            wx.CallAfter(self.on_about)
+            self.defer_menu_action(self.on_about)
         elif event_id == self.dark_mode_menu_item.GetId():
             self.on_dark_mode_button()
         elif event_id == self.colour_blind_menu_item.GetId():
             self.on_colour_blind_button()
         elif event_id in self.language_menu_codes:
             self.set_language(self.language_menu_codes[event_id])
+
+    def defer_menu_action(self, action):
+        """Run a dialog-opening menu action after the menu fully closes.
+
+        Opening a dialog straight from the menu event races the menu
+        teardown on slow compositors (WSLg renders over RDP): the dialog
+        can map before the frame regains focus and end up stacked behind
+        it.  A short delay lets the dismissal finish first.
+        """
+        wx.CallLater(120, action)
+
+    def show_dialog_raised(self, dialog):
+        """Show a modal dialog and keep it in front of the main frame.
+
+        On WSLg desktops a freshly opened dialog can stack behind the
+        main window until the user switches apps.  The keep-above window
+        hint is honoured there where a plain raise is ignored as focus
+        stealing, so apply it before showing; the raise timers (which
+        fire inside the modal loop) remain as a fallback.
+        """
+        self.keep_dialog_above(dialog)
+        raisers = [
+            wx.CallLater(250, self.raise_window, dialog),
+            wx.CallLater(700, self.raise_window, dialog),
+        ]
+        try:
+            return dialog.ShowModal()
+        finally:
+            for raiser in raisers:
+                raiser.Stop()
+
+    def keep_dialog_above(self, dialog):
+        """Ask the window manager to keep a dialog above other windows.
+
+        WSLg translates the keep-above hint into a Windows topmost flag,
+        which sidesteps its dialog-stacking bug.  Adding wxSTAY_ON_TOP
+        through SetWindowStyleFlag makes wxWidgets apply the hint to the
+        dialog's GTK window even for native dialogs, whose creation path
+        ignores the flag.
+        """
+        if not sys.platform.startswith("linux"):
+            return
+        dialog.SetWindowStyleFlag(
+            dialog.GetWindowStyleFlag() | wx.STAY_ON_TOP
+        )
+
+    def raise_window(self, window):
+        """Bring a window to the front if it still exists.
+
+        Re-applies the keep-above hint first: the generic message
+        dialog only creates its real window inside ShowModal (with a
+        fixed style), so a hint set beforehand is lost; by the time
+        this timer fires the window exists and the change sticks.
+        """
+        if window:
+            self.keep_dialog_above(window)
+            window.Raise()
+
+    def show_message_raised(self, message, caption, style):
+        """Show a message dialog that recovers from stacking races.
+
+        The generic (wx-drawn) message dialog is used because the native
+        one only creates its window inside ShowModal, too late for the
+        keep-above hint that stops WSLg hiding it behind the frame.
+        """
+        with wx.GenericMessageDialog(self, message, caption, style) as dlg:
+            self.show_dialog_raised(dlg)
 
     def set_language(self, language_code):
         """Switch visible GUI labels to the selected language."""
@@ -3930,7 +4000,6 @@ class Gui(wx.Frame):
         self.step_button.SetLabel(self.t("step"))
         self.auto_run_button.SetLabel(self.t("auto_run"))
         self.speed_label.SetLabel(self.t("auto_speed"))
-        self.help_button.SetLabel(self.t("help"))
 
         self.switch_box.SetLabel(self.t("switches"))
         self.monitor_box.SetLabel(self.t("monitors"))
@@ -3953,6 +4022,9 @@ class Gui(wx.Frame):
         self.maximise_label.SetLabel(self.t("maximise"))
         self.maximise_circuit_button.SetLabel(self.t("maximise_circuit"))
         self.maximise_scope_button.SetLabel(self.t("maximise_scope"))
+        self.match_control_widths(
+            [self.add_monitor_button, self.remove_monitor_button]
+        )
         self.canvas.set_translator(self.t)
         self.apply_theme()
         self.Layout()
@@ -4073,7 +4145,7 @@ class Gui(wx.Frame):
             wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST,
         ) as dialog:
-            if dialog.ShowModal() == wx.ID_CANCEL:
+            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return
             path = dialog.GetPath()
 
@@ -4092,7 +4164,7 @@ class Gui(wx.Frame):
             wildcard=self.t("definition_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
-            if dialog.ShowModal() == wx.ID_CANCEL:
+            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return
             save_path = dialog.GetPath()
 
@@ -4101,7 +4173,7 @@ class Gui(wx.Frame):
                 shutil.copyfile(self.path, save_path)
             self.set_status(self.format_text("saved_file", path=save_path))
         except OSError as error:
-            wx.MessageBox(
+            self.show_message_raised(
                 self.format_text("file_save_error_body", error=error),
                 self.t("file_save_error_title"),
                 wx.OK | wx.ICON_ERROR,
@@ -4128,7 +4200,7 @@ class Gui(wx.Frame):
             else:
                 self.set_status(self.t("export_circuit_failed"), error=True)
         except Exception as error:
-            wx.MessageBox(
+            self.show_message_raised(
                 self.format_text("circuit_export_error_body", error=error),
                 self.t("circuit_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
@@ -4155,7 +4227,7 @@ class Gui(wx.Frame):
             else:
                 self.set_status(self.t("export_scope_failed"), error=True)
         except Exception as error:
-            wx.MessageBox(
+            self.show_message_raised(
                 self.format_text("scope_export_error_body", error=error),
                 self.t("scope_export_error_title"),
                 wx.OK | wx.ICON_ERROR,
@@ -4172,7 +4244,7 @@ class Gui(wx.Frame):
             wildcard=self.t("export_file_wildcard"),
             style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT,
         ) as dialog:
-            if dialog.ShowModal() == wx.ID_CANCEL:
+            if self.show_dialog_raised(dialog) == wx.ID_CANCEL:
                 return None
             export_path = dialog.GetPath()
             filter_index = dialog.GetFilterIndex()
@@ -4213,7 +4285,7 @@ class Gui(wx.Frame):
 
     def on_help(self):
         """Display a concise user guide."""
-        wx.MessageBox(
+        self.show_message_raised(
             self.t("help_text"),
             self.t("help_title"),
             wx.OK | wx.ICON_INFORMATION,
@@ -4221,7 +4293,7 @@ class Gui(wx.Frame):
 
     def on_about(self):
         """Display application information."""
-        wx.MessageBox(
+        self.show_message_raised(
             self.t("about_text"),
             self.t("about_title"),
             wx.OK | wx.ICON_INFORMATION,
@@ -4351,5 +4423,11 @@ class Gui(wx.Frame):
             self.log_entries = self.log_entries[-300:]
 
         self.log_text.ChangeValue("\n".join(self.log_entries))
-        self.log_text.SetInsertionPointEnd()
-        self.log_text.ShowPosition(self.log_text.GetLastPosition())
+        # Land on the START of the newest line: the view stays pinned to
+        # the bottom but the horizontal scroll rests at the left, so each
+        # new entry is read from its beginning.
+        last_line_start = (
+            self.log_text.GetLastPosition() - len(self.log_entries[-1])
+        )
+        self.log_text.SetInsertionPoint(max(last_line_start, 0))
+        self.log_text.ShowPosition(max(last_line_start, 0))
