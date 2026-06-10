@@ -111,7 +111,12 @@
       "no_monitors": "No monitor points selected.",
       "press_run": "Press Run to record signal traces.",
       "cycles_shown": "Cycles shown: {first}-{last}",
-      "level": "Level"
+      "level": "Level",
+      "trace_art_style": "3D art style",
+      "trace_art_modern": "Modern",
+      "trace_art_template": "Template",
+      "trace_art_modern_enabled": "Modern 3D trace style enabled.",
+      "trace_art_template_enabled": "Template 3D trace style enabled."
     },
     "es": {
       "window_title": "Simulador lógico",
@@ -217,7 +222,12 @@
       "no_monitors": "No hay puntos de monitor seleccionados.",
       "press_run": "Pulsa Ejecutar para grabar trazas de señal.",
       "cycles_shown": "Ciclos mostrados: {first}-{last}",
-      "level": "Nivel"
+      "level": "Nivel",
+      "trace_art_style": "Estilo 3D",
+      "trace_art_modern": "Moderno",
+      "trace_art_template": "Plantilla",
+      "trace_art_modern_enabled": "Estilo moderno de trazas 3D activado.",
+      "trace_art_template_enabled": "Estilo de plantilla de trazas 3D activado."
     },
     "ar": {
       "window_title": "محاكي المنطق",
@@ -323,7 +333,12 @@
       "no_monitors": "لا توجد نقاط مراقبة محددة.",
       "press_run": "اضغط تشغيل لتسجيل آثار الإشارة.",
       "cycles_shown": "الدورات المعروضة: {first}-{last}",
-      "level": "المستوى"
+      "level": "المستوى",
+      "trace_art_style": "نمط 3D",
+      "trace_art_modern": "حديث",
+      "trace_art_template": "قالب",
+      "trace_art_modern_enabled": "تم تفعيل نمط التتبعات ثلاثية الأبعاد الحديث.",
+      "trace_art_template_enabled": "تم تفعيل نمط قالب التتبعات ثلاثية الأبعاد."
     },
     "fr": {
       "window_title": "Simulateur logique",
@@ -391,7 +406,12 @@
       "about_title": "À propos de Logsim",
       "about_text": "Simulateur logique GF2\nInterface graphique avec circuit et oscilloscope.\nÉchantillon Unicode: Ω Ж 中",
       "help_text": "Lancer: démarre le circuit et enregistre N cycles.\nContinuer: ajoute N cycles sans effacer les traces.\nPas: avance d'un cycle.\nAuto: avance jusqu'à l'arrêt.\nRégler interrupteur: change un interrupteur à 0 ou 1.\nAjouter/Retirer moniteur: choisit les sorties visibles.\nGlisser la souris déplace la vue; la molette zoome.\nSur l'oscilloscope, la molette fait défiler les lignes.\nFichier > Ouvrir charge un autre fichier.",
-      "oscilloscope_3d": "Oscilloscope - traces 3D"
+      "oscilloscope_3d": "Oscilloscope - traces 3D",
+      "trace_art_style": "Style 3D",
+      "trace_art_modern": "Moderne",
+      "trace_art_template": "Gabarit",
+      "trace_art_modern_enabled": "Style de traces 3D moderne activé.",
+      "trace_art_template_enabled": "Style de traces 3D gabarit activé."
     },
     "de": {
       "window_title": "Logiksimulator",
@@ -459,7 +479,12 @@
       "about_title": "Info zu Logsim",
       "about_text": "GF2 Logiksimulator\nGrafische Oberfläche mit Schaltung und Oszilloskop.\nUnicode-Beispiel: Ω Ж 中",
       "help_text": "Start: startet die Schaltung und speichert N Zyklen.\nWeiter: speichert N weitere Zyklen ohne zu löschen.\nSchritt: führt einen Zyklus aus.\nAuto: läuft weiter bis zum Stoppen.\nSchalter setzen: setzt den Schalter auf 0 oder 1.\nMonitor hinzufügen/entfernen: wählt sichtbare Ausgänge.\nMausziehen verschiebt die Ansicht; Mausrad zoomt.\nÜber dem Oszilloskop scrollt das Mausrad Signalzeilen.\nDatei > Öffnen lädt eine andere Datei.",
-      "oscilloscope_3d": "Oszilloskop - 3D-Spuren"
+      "oscilloscope_3d": "Oszilloskop - 3D-Spuren",
+      "trace_art_style": "3D-Stil",
+      "trace_art_modern": "Modern",
+      "trace_art_template": "Vorlage",
+      "trace_art_modern_enabled": "Moderner 3D-Spurenstil aktiviert.",
+      "trace_art_template_enabled": "Vorlagen-3D-Spurenstil aktiviert."
     }
   }
 }

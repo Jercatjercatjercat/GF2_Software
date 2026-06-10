@@ -164,6 +164,7 @@ def make_canvas(devices):
     canvas.scope_first_row = 0
     canvas.scope_geometry = {}
     canvas.trace_display_3d = False
+    canvas.trace_3d_art_style = "modern"
     canvas.trace_3d_rotate_x = 28.0
     canvas.trace_3d_rotate_y = -34.0
     canvas.trace_3d_pan_x = 0.0
@@ -391,6 +392,36 @@ def test_trace_display_3d_toggle_refreshes_canvas():
     assert canvas.init is False
     assert canvas.trace_3d_drag_active is False
     assert refreshed == [True]
+
+
+def test_trace_3d_art_style_switches_and_refreshes_canvas():
+    """Test if the 3D trace art style can be switched safely."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+    refreshed = []
+    canvas.Refresh = lambda: refreshed.append(True)
+    canvas.init = True
+
+    canvas.set_trace_3d_art_style("template")
+
+    assert canvas.trace_3d_art_style == "template"
+    assert canvas.init is False
+    assert refreshed == [True]
+
+    canvas.set_trace_3d_art_style("unknown")
+
+    assert canvas.trace_3d_art_style == "modern"
+
+
+def test_template_3d_style_uses_short_and_tall_cuboids():
+    """Test if the template style maps signal levels to cuboid heights."""
+    devices = FakeDevices([fake_device("A")])
+    canvas = make_canvas(devices)
+
+    assert canvas.template_signal_height_3d(devices.HIGH) == 11.0
+    assert canvas.template_signal_height_3d(devices.LOW) == 1.0
+    assert canvas.template_signal_height_3d(devices.BLANK) is None
+    assert canvas.template_signal_colour_3d(devices.HIGH) == (1.0, 0.70, 0.50)
 
 
 def test_circuit_content_size_grows_only_for_complex_diagrams():

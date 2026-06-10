@@ -30,7 +30,7 @@ Use `--3d` for the 3D trace visualisation method from `logsim/gui_3D.py`:
 python3 logsim/logsim.py --3d examples/example1_mixed_combinational.txt
 ```
 
-In the 3D GUI, run or continue the simulation first so traces exist, then drag the oscilloscope with the mouse to rotate it. Hold Shift while dragging to pan the 3D trace view, and use the mouse wheel over the oscilloscope to zoom.
+In the 3D GUI, run or continue the simulation first so traces exist, then use `View > 3D art style` in the side panel to choose `Modern` or `Template`. `Modern` is the maintained GUI style; `Template` uses the old `gui_3D.py` black-scene cuboid look. Drag the oscilloscope with the mouse to rotate it, hold Shift while dragging to pan, and use the mouse wheel over the oscilloscope to zoom.
 
 If `python3` cannot import `wx`, use the Python executable from the conda environment where `wxPython` is installed, for example:
 
