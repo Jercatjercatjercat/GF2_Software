@@ -2,11 +2,11 @@
 
 import pytest
 
-from devices import Devices
-from gui_controller import GuiController
-from monitors import Monitors
-from names import Names
-from network import Network
+from final.logsim.devices import Devices
+from final.logsim.gui_controller import GuiController
+from final.logsim.monitors import Monitors
+from final.logsim.names import Names
+from final.logsim.network import Network
 
 
 @pytest.fixture

@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from devices import Devices
-from monitors import Monitors
-from names import Names
-from network import Network
-from parse import Parser, parse_network_with_diagnostics
-from scanner import Scanner
+from final.logsim.devices import Devices
+from final.logsim.monitors import Monitors
+from final.logsim.names import Names
+from final.logsim.network import Network
+from final.logsim.parse import Parser, parse_network_with_diagnostics
+from final.logsim.scanner import Scanner
 
 
 EXAMPLE_FILES = [

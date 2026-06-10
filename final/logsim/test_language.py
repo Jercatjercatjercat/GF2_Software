@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from logsim import detect_startup_language
-from language import (
+from final.logsim import detect_startup_language
+from final.logsim.language import (
     choose_language,
     initialise_wx_locale,
     language_from_environment,

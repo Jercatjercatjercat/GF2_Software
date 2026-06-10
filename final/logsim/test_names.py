@@ -1,6 +1,6 @@
 """Test the names module."""
 import pytest
-from names import Names
+from final.logsim.names import Names
 
 
 @pytest.fixture

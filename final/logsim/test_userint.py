@@ -1,11 +1,11 @@
 """Test the userint module."""
 import pytest
 
-from devices import Devices
-from monitors import Monitors
-from names import Names
-from network import Network
-from userint import UserInterface
+from final.logsim.devices import Devices
+from final.logsim.monitors import Monitors
+from final.logsim.names import Names
+from final.logsim.network import Network
+from final.logsim.userint import UserInterface
 
 
 @pytest.fixture

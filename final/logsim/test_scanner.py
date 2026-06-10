@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from names import Names
-from scanner import Scanner, Symbol
+from final.logsim.names import Names
+from final.logsim.scanner import Scanner, Symbol
 
 
 @pytest.fixture

@@ -1,9 +1,9 @@
 """Test the network module."""
 import pytest
 
-from names import Names
-from devices import Devices
-from network import Network
+from final.logsim.names import Names
+from final.logsim.devices import Devices
+from final.logsim.network import Network
 
 
 @pytest.fixture

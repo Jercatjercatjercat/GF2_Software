@@ -14,7 +14,7 @@ import wx
 import wx.glcanvas as wxcanvas
 from OpenGL import GL, GLU, GLUT
 
-from language import (
+from final.logsim.language import (
     DEFAULT_LANGUAGE,
     choose_language,
     initialise_wx_locale,
@@ -22,13 +22,13 @@ from language import (
     load_translations,
     translate,
 )
-from names import Names
-from devices import Devices
-from network import Network
-from monitors import Monitors
-from scanner import Scanner
-from parse import Parser, parse_network_with_diagnostics
-from gui_controller import GuiController
+from final.logsim.names import Names
+from final.logsim.devices import Devices
+from final.logsim.network import Network
+from final.logsim.monitors import Monitors
+from final.logsim.scanner import Scanner
+from final.logsim.parse import Parser, parse_network_with_diagnostics
+from final.logsim.gui_controller import GuiController
 
 
 def show_parse_error_dialog(parent, path, diagnostics, language_code=None):

@@ -14,12 +14,12 @@ import numpy as np
 import math
 from OpenGL import GL, GLU, GLUT
 
-from names import Names
-from devices import Devices
-from network import Network
-from monitors import Monitors
-from scanner import Scanner
-from parse import Parser
+from final.logsim.names import Names
+from final.logsim.devices import Devices
+from final.logsim.network import Network
+from final.logsim.monitors import Monitors
+from final.logsim.scanner import Scanner
+from final.logsim.parse import Parser
 
 
 class MyGLCanvas(wxcanvas.GLCanvas):
@@ -382,7 +382,7 @@ TemplateGui = Gui
 # The original class above is kept as the supplied 3D template/example.  The
 # application entry point below reuses the maintained GUI and opens it with
 # the oscilloscope's real 3D trace mode enabled by default.
-from gui import Gui as BaseGui, show_parse_error_dialog
+from final.logsim.gui import Gui as BaseGui, show_parse_error_dialog
 
 
 class Gui3D(BaseGui):

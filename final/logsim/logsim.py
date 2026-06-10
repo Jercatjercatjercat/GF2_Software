@@ -15,14 +15,14 @@ import getopt
 import sys
 
 
-from names import Names
-from devices import Devices
-from network import Network
-from monitors import Monitors
-from scanner import Scanner
-from parse import Parser, parse_network_with_diagnostics
-from userint import UserInterface
-from language import (
+from final.logsim.names import Names
+from final.logsim.devices import Devices
+from final.logsim.network import Network
+from final.logsim.monitors import Monitors
+from final.logsim.scanner import Scanner
+from final.logsim.parse import Parser, parse_network_with_diagnostics
+from final.logsim.userint import UserInterface
+from final.logsim.language import (
     language_from_linux_locale,
     language_from_environment,
     language_from_python_locale,
@@ -127,10 +127,10 @@ def main(arg_list):
     # terminal and in a graphical dialog.
     import wx
     if use_3d_gui:
-        from gui_3D import Gui3D as Gui
-        from gui_3D import show_parse_error_dialog
+        from final.logsim.gui_3D import Gui3D as Gui
+        from final.logsim.gui_3D import show_parse_error_dialog
     else:
-        from gui import Gui, show_parse_error_dialog
+        from final.logsim.gui import Gui, show_parse_error_dialog
 
     app = wx.App()
     if success:
