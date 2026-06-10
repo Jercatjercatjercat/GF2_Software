@@ -39,7 +39,7 @@ def show_parse_error_dialog(parent, path, diagnostics, language_code=None):
 
     def t(key):
         """Return translated text for the parser dialog."""
-        return translate(translations, language_code, key)
+        return translate(translations, language_code, key, wx)
 
     message = t("parse_error_intro") + "\n" + str(path)
     diagnostics = diagnostics.strip()
@@ -146,7 +146,7 @@ class MyGLCanvas(wxcanvas.GLCanvas):
         """Return translated canvas text."""
         translator = getattr(self, "translator", None)
         if translator is None:
-            return translate(load_translations(), DEFAULT_LANGUAGE, key)
+            return translate(load_translations(), DEFAULT_LANGUAGE, key, wx)
         return translator(key)
 
     def reset_view(self):
@@ -1793,7 +1793,7 @@ class Gui(wx.Frame):
 
     def t(self, key):
         """Translate a UI label for the current language."""
-        return translate(self.translations, self.current_language, key)
+        return translate(self.translations, self.current_language, key, wx)
 
     def format_text(self, key, **values):
         """Translate a UI label and format named placeholders."""
@@ -2307,6 +2307,7 @@ class Gui(wx.Frame):
             return
 
         self.current_language = language_code
+        self.wx_locale = initialise_wx_locale(wx, self.current_language)
         self.canvas.set_translator(self.t)
         self.update_language_labels()
         self.set_status(self.t("language_changed"))

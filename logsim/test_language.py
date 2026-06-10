@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from logsim import detect_startup_language
 from language import (
     choose_language,
+    ensure_wx_gettext_catalogues,
     initialise_wx_locale,
     language_from_environment,
     language_from_linux_locale,
@@ -530,19 +531,45 @@ def test_wx_locale_detection_does_not_initialise_locale_object():
     assert language_from_wx_locale(fake_wx, {"en", "es"}) is None
 
 
-def test_initialise_wx_locale_skips_english_default():
-    """Test if English avoids unnecessary OS locale initialisation."""
+def test_ensure_wx_gettext_catalogues_builds_mo_files():
+    """Test if JSON translations are compiled for wx.GetTranslation."""
+    catalogue_path = ensure_wx_gettext_catalogues()
+
+    assert (
+        catalogue_path / "es" / "LC_MESSAGES" / "logsim.mo"
+    ).exists()
+    assert (
+        catalogue_path / "es_ES" / "LC_MESSAGES" / "logsim.mo"
+    ).exists()
+    assert (
+        catalogue_path / "en" / "LC_MESSAGES" / "logsim.mo"
+    ).exists()
+
+
+def test_initialise_wx_locale_loads_english_catalogue():
+    """Test if English also initialises wx for GetTranslation."""
 
     class FakeLocale:
-        """Small stand-in for wx.Locale that must not be instantiated."""
+        """Small stand-in for wx.Locale."""
 
-        def __init__(self):
-            """Fail if English tries to create a wx.Locale object."""
-            raise AssertionError("English should not initialise wx.Locale")
+        initialised_language_id = None
+        loaded_catalogue = None
+
+        def Init(self, language_id):
+            """Record the language ID used for locale initialisation."""
+            FakeLocale.initialised_language_id = language_id
+            return True
+
+        def AddCatalog(self, catalogue_domain):
+            """Record the loaded catalogue domain."""
+            FakeLocale.loaded_catalogue = catalogue_domain
+            return True
 
     fake_wx = SimpleNamespace(Locale=FakeLocale, LANGUAGE_ENGLISH=1)
 
-    assert initialise_wx_locale(fake_wx, "en") is None
+    assert initialise_wx_locale(fake_wx, "en") is not None
+    assert FakeLocale.initialised_language_id == 1
+    assert FakeLocale.loaded_catalogue == "logsim"
 
 
 def test_initialise_wx_locale_skips_unavailable_linux_locale():
@@ -572,29 +599,52 @@ def test_initialise_wx_locale_uses_available_non_english_locale():
         """Small stand-in for wx.Locale with availability metadata."""
 
         initialised_language_id = None
+        lookup_path = None
+        loaded_catalogue = None
 
         @staticmethod
         def IsAvailable(_language_id):
             """Return that the requested locale is available."""
             return True
 
+        @staticmethod
+        def AddCatalogLookupPathPrefix(path):
+            """Record the catalogue lookup path."""
+            FakeLocale.lookup_path = path
+
         def Init(self, language_id):
             """Record the language ID used for locale initialisation."""
             FakeLocale.initialised_language_id = language_id
+            return True
+
+        def AddCatalog(self, catalogue_domain):
+            """Record the loaded catalogue domain."""
+            FakeLocale.loaded_catalogue = catalogue_domain
             return True
 
     fake_wx = SimpleNamespace(Locale=FakeLocale, LANGUAGE_SPANISH=2)
 
     assert initialise_wx_locale(fake_wx, "es") is not None
     assert FakeLocale.initialised_language_id == 2
+    assert "logsim_wx_locale_" in FakeLocale.lookup_path
+    assert FakeLocale.loaded_catalogue == "logsim"
+
+
+def test_translate_uses_wx_gettranslation_first():
+    """Test if text lookup uses wx.GetTranslation when available."""
+    translations = {"en": {"hello": "Hello"}, "es": {"hello": "Hola"}}
+    fake_wx = SimpleNamespace(GetTranslation=lambda key: "wx:" + key)
+
+    assert translate(translations, "es", "hello", fake_wx) == "wx:hello"
 
 
 def test_translate_falls_back_to_english():
-    """Test if missing translations fall back to English text."""
+    """Test if missing wx translations fall back to English text."""
     translations = {"en": {"hello": "Hello"}, "es": {}}
+    fake_wx = SimpleNamespace(GetTranslation=lambda key: key)
 
-    assert translate(translations, "es", "hello") == "Hello"
-    assert translate(translations, "es", "missing") == "missing"
+    assert translate(translations, "es", "hello", fake_wx) == "Hello"
+    assert translate(translations, "es", "missing", fake_wx) == "missing"
 
 
 def test_catalogue_contains_non_latin_sample():

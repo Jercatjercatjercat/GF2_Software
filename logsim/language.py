@@ -1,13 +1,24 @@
 """Load and select GUI languages for the logic simulator."""
 
+import hashlib
 import json
 import locale as python_locale
 import os
+import struct
+import tempfile
 from pathlib import Path
 
 
 DEFAULT_LANGUAGE = "en"
 CATALOGUE_PATH = Path(__file__).with_name("locales") / "gui_text.json"
+CATALOGUE_DOMAIN = "logsim"
+CATALOGUE_LOCALE_ALIASES = {
+    "ar": ["ar", "ar_SA"],
+    "de": ["de", "de_DE"],
+    "en": ["en", "en_GB", "en_US"],
+    "es": ["es", "es_ES"],
+    "fr": ["fr", "fr_FR"],
+}
 LANGUAGE_ALIASES = {
     "arabic": "ar",
     "deutsch": "de",
@@ -24,6 +35,81 @@ WINDOWS_PRIMARY_LANGUAGE_IDS = {
     0x0C: "fr",
 }
 LINUX_LANGUAGE_KEYS = ["Language", "LANGUAGE", "LC_MESSAGES", "LANG"]
+
+
+def gettext_catalogue_bytes(messages):
+    """Return a binary gettext catalogue for msgid -> msgstr messages."""
+    metadata = (
+        "Project-Id-Version: logsim\n"
+        "Content-Type: text/plain; charset=UTF-8\n"
+        "Content-Transfer-Encoding: 8bit\n"
+    )
+    all_messages = {"": metadata}
+    all_messages.update(messages)
+    ids = sorted(all_messages)
+    strings = [all_messages[msgid] for msgid in ids]
+    id_bytes = [msgid.encode("utf-8") for msgid in ids]
+    string_bytes = [msgstr.encode("utf-8") for msgstr in strings]
+    count = len(ids)
+    key_table_offset = 7 * 4
+    value_table_offset = key_table_offset + count * 8
+    key_strings_offset = value_table_offset + count * 8
+    value_strings_offset = key_strings_offset + sum(
+        len(data) + 1 for data in id_bytes
+    )
+
+    key_offsets = []
+    offset = key_strings_offset
+    for data in id_bytes:
+        key_offsets.append((len(data), offset))
+        offset += len(data) + 1
+
+    value_offsets = []
+    offset = value_strings_offset
+    for data in string_bytes:
+        value_offsets.append((len(data), offset))
+        offset += len(data) + 1
+
+    chunks = [
+        struct.pack(
+            "Iiiiiii", 0x950412de, 0, count, key_table_offset,
+            value_table_offset, 0, 0
+        )
+    ]
+    chunks.extend(struct.pack("ii", *entry) for entry in key_offsets)
+    chunks.extend(struct.pack("ii", *entry) for entry in value_offsets)
+    chunks.append(b"\0".join(id_bytes) + b"\0")
+    chunks.append(b"\0".join(string_bytes) + b"\0")
+    return b"".join(chunks)
+
+
+def ensure_wx_gettext_catalogues(path=CATALOGUE_PATH):
+    """Compile JSON translations into temp gettext catalogues for wx."""
+    catalogue = load_catalogue(path)
+    translations = catalogue.get("translations", {})
+    digest = hashlib.sha1(
+        json.dumps(
+            {"version": 2, "translations": translations},
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:12]
+    base_path = Path(tempfile.gettempdir()) / ("logsim_wx_locale_" + digest)
+
+    for language_code, messages in translations.items():
+        catalogue_bytes = gettext_catalogue_bytes(messages)
+        locale_codes = CATALOGUE_LOCALE_ALIASES.get(
+            language_code, [language_code]
+        )
+        for locale_code in locale_codes:
+            target_dir = base_path / locale_code / "LC_MESSAGES"
+            target_path = target_dir / (CATALOGUE_DOMAIN + ".mo")
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(catalogue_bytes)
+
+    return base_path
 
 
 def supported_language_code(locale_name, supported_languages=None):
@@ -411,11 +497,10 @@ def wx_language_id(wx_module, language_code):
     return getattr(wx_module, "LANGUAGE_DEFAULT", -1)
 
 
-def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
-    """Initialise and return a wx.Locale object for this application."""
+def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE,
+                         locale_path=None, catalogue_domain=CATALOGUE_DOMAIN):
+    """Initialise wx.Locale and load the application message catalogue."""
     if wx_module is None or not hasattr(wx_module, "Locale"):
-        return None
-    if language_code == DEFAULT_LANGUAGE:
         return None
 
     try:
@@ -428,6 +513,15 @@ def initialise_wx_locale(wx_module, language_code=DEFAULT_LANGUAGE):
         locale_object = wx_module.Locale()
         if not locale_object.Init(language_id):
             return None
+
+        if locale_path is None:
+            locale_path = ensure_wx_gettext_catalogues()
+        if hasattr(wx_module.Locale, "AddCatalogLookupPathPrefix"):
+            wx_module.Locale.AddCatalogLookupPathPrefix(
+                str(Path(locale_path).resolve())
+            )
+        if hasattr(locale_object, "AddCatalog"):
+            locale_object.AddCatalog(catalogue_domain)
     except (AttributeError, TypeError, RuntimeError):
         return None
 
@@ -479,8 +573,13 @@ def choose_language(translations, wx_module=None, environ=None,
     return DEFAULT_LANGUAGE
 
 
-def translate(translations, language_code, key):
-    """Return translated text, falling back to English and then the key."""
+def translate(translations, language_code, key, wx_module=None):
+    """Return translated text using wx.GetTranslation with fallback text."""
+    if wx_module is not None and hasattr(wx_module, "GetTranslation"):
+        translated_text = wx_module.GetTranslation(key)
+        if translated_text != key:
+            return translated_text
+
     selected_language = translations.get(language_code, {})
     english = translations.get(DEFAULT_LANGUAGE, {})
     return selected_language.get(key, english.get(key, key))
