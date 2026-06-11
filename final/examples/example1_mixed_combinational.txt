@@ -1,0 +1,49 @@
+# Example 1: mixed combinational logic network
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(1);
+    C : SWITCH(1);
+    D : SWITCH(0);
+
+    G_AND : AND(2);
+    G_OR : OR(2);
+    G_NAND : NAND(2);
+    G_NOR : NOR(2);
+    G_XOR : XOR;
+}
+
+CONNECT {
+    # First layer
+    A -> G_AND.I1;
+    B -> G_AND.I2;
+
+    C -> G_OR.I1;
+    D -> G_OR.I2;
+
+    # Combine first layer outputs
+    G_AND -> G_NAND.I1;
+    G_OR -> G_NAND.I2;
+
+    # Compare two signals
+    A -> G_XOR.I1;
+    C -> G_XOR.I2;
+
+    # Final NOR stage
+    G_NAND -> G_NOR.I1;
+    G_XOR -> G_NOR.I2;
+}
+
+MONITOR {
+    A,
+    B,
+    C,
+    D,
+    G_AND,
+    G_OR,
+    G_NAND,
+    G_XOR,
+    G_NOR
+};
+
+END;

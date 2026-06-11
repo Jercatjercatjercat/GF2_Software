@@ -1,0 +1,59 @@
+# Example 2: clocked circuit using a DTYPE latch
+
+DEVICES {
+    CLK1 : CLOCK(4);
+
+    DATA_SW : SWITCH(1);
+    SET_SW : SWITCH(0);
+    CLEAR_SW : SWITCH(0);
+    ENABLE : SWITCH(1);
+
+    FF1 : DTYPE;
+
+    INV_LOGIC : XOR;
+    HOLD_GATE : AND(2);
+    SET_OR_CLEAR : OR(2);
+    RESET_BLOCK : NAND(2);
+    FINAL_TEST : NOR(2);
+}
+
+CONNECT {
+    # DTYPE control connections
+    DATA_SW -> FF1.DATA;
+    CLK1 -> FF1.CLK;
+    SET_SW -> FF1.SET;
+    CLEAR_SW -> FF1.CLEAR;
+
+    # Use DTYPE outputs in later logic
+    FF1.Q -> INV_LOGIC.I1;
+    ENABLE -> INV_LOGIC.I2;
+
+    FF1.Q -> HOLD_GATE.I1;
+    ENABLE -> HOLD_GATE.I2;
+
+    SET_SW -> SET_OR_CLEAR.I1;
+    CLEAR_SW -> SET_OR_CLEAR.I2;
+
+    HOLD_GATE -> RESET_BLOCK.I1;
+    SET_OR_CLEAR -> RESET_BLOCK.I2;
+
+    INV_LOGIC -> FINAL_TEST.I1;
+    RESET_BLOCK -> FINAL_TEST.I2;
+}
+
+MONITOR {
+    CLK1,
+    DATA_SW,
+    SET_SW,
+    CLEAR_SW,
+    ENABLE,
+    FF1.Q,
+    FF1.QBAR,
+    INV_LOGIC,
+    HOLD_GATE,
+    SET_OR_CLEAR,
+    RESET_BLOCK,
+    FINAL_TEST
+};
+
+END;

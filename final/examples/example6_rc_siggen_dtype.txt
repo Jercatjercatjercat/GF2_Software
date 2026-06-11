@@ -1,0 +1,32 @@
+# Example 6: RC power-up reset with SIGGEN clock
+
+DEVICES {
+    RESET_PULSE : RC(2);
+    PATTERN_CLK : SIGGEN(0, 1, 0, 1);
+
+    DATA_SW : SWITCH(1);
+    SET_SW : SWITCH(0);
+
+    FF1 : DTYPE;
+}
+
+CONNECT {
+    # SIGGEN provides a repeating clock-like waveform
+    PATTERN_CLK -> FF1.CLK;
+
+    # RC starts high, briefly clearing the DTYPE on power-up
+    RESET_PULSE -> FF1.CLEAR;
+
+    DATA_SW -> FF1.DATA;
+    SET_SW -> FF1.SET;
+}
+
+MONITOR {
+    RESET_PULSE,
+    PATTERN_CLK,
+    DATA_SW,
+    FF1.Q,
+    FF1.QBAR
+};
+
+END;

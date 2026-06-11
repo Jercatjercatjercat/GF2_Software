@@ -1,0 +1,13 @@
+# Stress test 01: missing device name before colon
+
+DEVICES {
+    : SWITCH(0);
+}
+
+CONNECT {
+}
+
+MONITOR {
+};
+
+END;

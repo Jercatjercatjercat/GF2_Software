@@ -1,0 +1,296 @@
+### Logic Description Language
+
+This revision responds to the feedback on the first report. The grammar now
+distinguishes input and output port syntax where this can be done cleanly, and
+it requires at least one declared device. Some checks must still remain
+semantic, because whether a particular port is valid depends on the declared
+device type and, for gates, the declared number of inputs.
+
+
+### Revised EBNF
+
+network =
+    devices_section , connections_section , monitors_section , "END" , ";" ;
+
+devices_section =
+    "DEVICES" , "{" , device_decl , { device_decl } , "}" ;
+
+device_decl =
+    device_name , ":" , device_spec , ";" ;
+
+device_spec =
+      "SWITCH" , "(" , bit , ")"
+    | "CLOCK" , "(" , positive_integer , ")"
+    | "RC" , "(" , positive_integer , ")"
+    | "SIGGEN" , "(" , bit , { "," , bit } , ")"
+    | gate_kind , "(" , positive_integer , ")"
+    | "DTYPE"
+    | "XOR" ;
+
+gate_kind =
+      "AND"
+    | "NAND"
+    | "OR"
+    | "NOR" ;
+
+connections_section =
+    "CONNECT" , "{" , { connection_decl } , "}" ;
+
+connection_decl =
+    output_signal , "->" , input_signal , ";" ;
+
+monitors_section =
+    "MONITOR" , "{" , [ output_signal , { "," , output_signal } ] , "}" , ";" ;
+
+input_signal =
+    device_name , "." , input_port ;
+
+output_signal =
+      device_name
+    | device_name , "." , dtype_output_port ;
+
+input_port =
+      gate_input_port
+    | dtype_input_port ;
+
+gate_input_port =
+      "I1" | "I2" | "I3" | "I4" | "I5" | "I6" | "I7" | "I8"
+    | "I9" | "I10" | "I11" | "I12" | "I13" | "I14" | "I15" | "I16" ;
+
+dtype_input_port =
+    "DATA" | "CLK" | "SET" | "CLEAR" ;
+
+dtype_output_port =
+    "Q" | "QBAR" ;
+
+device_name =
+    letter , { letter | digit | "_" } ;
+
+positive_integer =
+    non_zero_digit , { digit } ;
+
+bit =
+    "0" | "1" ;
+
+letter =
+    "A" | ... | "Z" | "a" | ... | "z" ;
+
+digit =
+    "0" | ... | "9" ;
+
+non_zero_digit =
+    "1" | ... | "9" ;
+
+
+### Notes on the Revision
+
+The original grammar used identical input_name and output_name rules. That was
+too permissive, because it allowed many obviously wrong signals to parse and
+then forced the implementation to catch them later as semantic errors. The
+revised grammar separates input_port from dtype_output_port. Therefore examples
+such as G1.OUT or G1.HELLO are syntax errors rather than semantic errors.
+
+The grammar still cannot completely replace semantic checking. For example,
+G1.I16 is syntactically an input signal, but if G1 is declared as NAND(2), then
+G1.I16 is semantically invalid. Similarly, D1.DATA is syntactically an input
+signal, but it is only semantically valid when D1 is a DTYPE.
+
+The RC device has one output and no inputs. On cold start-up its output is
+HIGH, and after the positive integer delay has elapsed it falls LOW. This is
+useful for driving DTYPE SET or CLEAR inputs during power-up.
+
+The SIGGEN device has one output and no inputs. Its comma-separated list of
+bits defines an arbitrary periodic waveform, with one value emitted per
+simulation cycle before the pattern repeats. For example, SIGGEN(0, 1, 1, 0)
+starts LOW, then outputs HIGH, HIGH, LOW, and repeats.
+
+The DEVICES section now requires at least one device:
+
+devices_section =
+    "DEVICES" , "{" , device_decl , { device_decl } , "}" ;
+
+This means an empty circuit is rejected by syntax rather than by a separate
+semantic rule.
+
+Device parameters have also been shortened. Instead of:
+
+SW1 : SWITCH(initial = 0);
+CLK1 : CLOCK(period = 4);
+RESET1 : RC(delay = 3);
+PATTERN1 : SIGGEN(waveform = 0, 1, 1, 0);
+G1 : NAND(inputs = 2);
+
+the revised language uses:
+
+SW1 : SWITCH(0);
+CLK1 : CLOCK(4);
+RESET1 : RC(3);
+PATTERN1 : SIGGEN(0, 1, 1, 0);
+G1 : NAND(2);
+
+This is less wordy while remaining readable because the device type determines
+the meaning of the parameter.
+
+
+### Example Definition File
+
+# Example: two cross-coupled NAND gates
+
+DEVICES {
+    SW1 : SWITCH(0);
+    SW2 : SWITCH(1);
+
+    G1 : NAND(2);
+    G2 : NAND(2);
+}
+
+CONNECT {
+    SW1 -> G1.I1;
+    SW2 -> G2.I2;
+    G1  -> G2.I1;
+    G2  -> G1.I2;
+}
+
+MONITOR {
+    G1, G2
+};
+
+END;
+
+
+### DTYPE Example
+
+DEVICES {
+    CLK1 : CLOCK(4);
+    DATA_SW : SWITCH(1);
+    SET_SW : SWITCH(0);
+    CLEAR_SW : SWITCH(0);
+    D1 : DTYPE;
+    G1 : AND(2);
+}
+
+CONNECT {
+    DATA_SW  -> D1.DATA;
+    CLK1     -> D1.CLK;
+    SET_SW   -> D1.SET;
+    CLEAR_SW -> D1.CLEAR;
+    D1.Q     -> G1.I1;
+    D1.QBAR  -> G1.I2;
+}
+
+MONITOR {
+    CLK1, D1.Q, D1.QBAR, G1
+};
+
+END;
+
+
+### Comments
+
+The scanner should support two comment forms:
+
+1. Open comments begin with # and continue until the end of the line.
+
+# This whole line is a comment
+G1 : NAND(2);  # This trailing comment is also ignored
+
+2. Closed comments begin with /* and end with */. They may span multiple lines
+and are useful for temporarily removing blocks of a definition file.
+
+/*
+DEVICES {
+    UNUSED : SWITCH(0);
+}
+*/
+
+Comments are removed by the scanner before symbols are passed to the parser, so
+the comment syntax is not part of the EBNF grammar.
+
+
+### Error Handling in Implementation
+
+Syntax and semantic errors are handled at different stages.
+
+Syntax errors are detected by the parser when the scanner's token sequence does
+not match the EBNF. The parser does not need a separate list of all possible
+syntax errors, because these are implicit in the grammar. A syntax error report
+should be practical rather than theoretical: it should state the line, column,
+unexpected token, and the construct expected at that point.
+
+Example:
+
+Line 4, column 14: syntax error: expected ';' after device declaration.
+
+Semantic errors are detected after a construct has parsed successfully, when the
+parser checks names, device types, ports and network connectivity against the
+objects stored in the Devices, Network and Monitors modules.
+
+Example:
+
+Line 12, column 5: semantic error: input G1.I1 is connected more than once.
+
+
+### Remaining Semantic Error Conditions
+
+Duplicate device name
+Detection: when adding a parsed device declaration, check whether its device
+name already exists.
+Report: semantic error: device name G1 is already defined.
+
+Gate input count outside the allowed range
+Detection: after parsing gate_kind(positive_integer), check that the number of
+inputs is allowed by the Devices module.
+Report: semantic error: gate G1 must have between 1 and 16 inputs.
+
+Undefined device in connection
+Detection: when checking a parsed connection, look up both device names in the
+device table.
+Report: semantic error: device G3 has not been declared.
+
+Undefined device in monitor list
+Detection: when checking a parsed monitor signal, look up the device name in
+the device table before checking whether the signal is an output.
+Report: semantic error: monitor refers to undefined device G5.
+
+Input port incompatible with declared device
+Detection: compare the parsed input port with the declared type and properties
+of the destination device.
+Report: semantic error: G1.I5 is not a valid input for a 2-input NAND gate.
+
+Output port incompatible with declared device
+Detection: compare the parsed output form with the declared source device.
+Single-output devices must be used without an output port, while DTYPE outputs
+must be D1.Q or D1.QBAR.
+Report: semantic error: DTYPE output must be specified as D1.Q or D1.QBAR.
+
+Connection from non-output signal
+Detection: resolve the left-hand side of a parsed connection and check that it
+is a valid output of the declared device.
+Report: semantic error: G1.I1 is an input and cannot be used as a connection
+source.
+
+Connection to non-input signal
+Detection: resolve the right-hand side of a parsed connection and check that it
+is a valid input of the declared device.
+Report: semantic error: G1 is an output and cannot be used as a connection
+destination.
+
+Input connected more than once
+Detection: store each connected input; report an error if another connection
+targets the same input.
+Report: semantic error: input G1.I1 is connected more than once.
+
+Required input left unconnected
+Detection: after all connections have been parsed, check every required input
+of every device.
+Report: semantic error: input G1.I2 is not connected.
+
+Monitor placed on non-output signal
+Detection: check each parsed monitor target against the output ports of its
+declared device.
+Report: semantic error: G1.I1 cannot be monitored because it is an input.
+
+Duplicate monitor signal
+Detection: store each monitor signal; report an error if a signal is listed
+again.
+Report: semantic error: monitor point G1 is listed more than once.

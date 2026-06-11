@@ -1,0 +1,21 @@
+# Stress test 06: invalid ports and wrong signal direction
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(1);
+    G1 : AND(2);
+    G2 : OR(1);
+    FF1 : DTYPE;
+}
+
+CONNECT {
+    A -> G1.I99;
+    G1.I1 -> G2.I1;
+    B -> FF1.Q;
+}
+
+MONITOR {
+    G2
+};
+
+END;

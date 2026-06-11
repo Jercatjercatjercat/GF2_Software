@@ -1,0 +1,29 @@
+# Example 3: flip-flop switch
+
+DEVICES {
+    CLK1 : CLOCK(4);
+
+    SET_SW : SWITCH(0);
+    CLEAR_SW : SWITCH(0);
+
+    FF_SWITCH : DTYPE;
+}
+
+CONNECT {
+    # Feed the inverted output back to DATA so the flip-flop toggles
+    FF_SWITCH.QBAR -> FF_SWITCH.DATA;
+
+    CLK1 -> FF_SWITCH.CLK;
+    SET_SW -> FF_SWITCH.SET;
+    CLEAR_SW -> FF_SWITCH.CLEAR;
+}
+
+MONITOR {
+    CLK1,
+    SET_SW,
+    CLEAR_SW,
+    FF_SWITCH.Q,
+    FF_SWITCH.QBAR
+};
+
+END;

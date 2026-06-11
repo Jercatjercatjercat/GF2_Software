@@ -1,0 +1,16 @@
+# Stress test 07: missing comma in monitor list
+
+DEVICES {
+    A : SWITCH(0);
+    B : SWITCH(1);
+}
+
+CONNECT {
+}
+
+MONITOR {
+    A
+    B
+};
+
+END;
