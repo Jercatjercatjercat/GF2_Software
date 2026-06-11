@@ -97,8 +97,8 @@ def test_set_switch_rejects_non_switch(controller):
     assert message == "G1 is not a switch."
 
 
-def test_add_monitor_mid_run_pads_blank_cycles(controller):
-    """Test if monitors added after running preserve time alignment."""
+def test_add_monitor_mid_run_uses_full_history(controller):
+    """Test if late-added monitors show values from earlier cycles."""
     controller.run_from_start(4)
 
     success, message = controller.add_monitor("SW1")
@@ -107,7 +107,7 @@ def test_add_monitor_mid_run_pads_blank_cycles(controller):
     assert message == "Added monitor SW1."
     assert controller.monitors.monitors_dictionary[(
         controller.names.query("SW1"), None
-    )] == [controller.devices.BLANK] * 4
+    )] == [controller.devices.LOW] * 4
 
 
 def test_add_monitor_rejects_duplicate(controller):

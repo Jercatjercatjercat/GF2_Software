@@ -57,8 +57,12 @@ class Monitors:
         # {(device_id, output_id): [signal_list]}
         self.monitors_dictionary = collections.OrderedDict()
 
+        # Hidden store for every output signal's recorded history.  The GUI
+        # monitor list controls visibility, not whether values are recorded.
+        self.signal_history_dictionary = collections.OrderedDict()
+
         # Removed monitors are hidden from the GUI list, but their traces are
-        # still recorded so re-adding a signal preserves the full timeline.
+        # still linked to the background history for re-adding later.
         self.inactive_monitors_dictionary = collections.OrderedDict()
 
         [self.NO_ERROR, self.NOT_OUTPUT,
@@ -79,16 +83,15 @@ class Monitors:
         else:
             key = (device_id, output_id)
             if key in self.inactive_monitors_dictionary:
-                self.monitors_dictionary[key] = (
-                    self.inactive_monitors_dictionary.pop(key)
-                )
-            else:
-                # If n simulation cycles have been completed before making
-                # this monitor, initialise with BLANK signals so the trace
-                # stays aligned with existing monitors.
-                self.monitors_dictionary[key] = [
-                    self.devices.BLANK] * cycles_completed
+                self.inactive_monitors_dictionary.pop(key)
+            self.monitors_dictionary[key] = self._signal_history_for(key)
             return self.NO_ERROR
+
+    def _signal_history_for(self, key):
+        """Return the stored full-cycle history for an output signal."""
+        if key not in self.signal_history_dictionary:
+            self.signal_history_dictionary[key] = []
+        return self.signal_history_dictionary[key]
 
     def remove_monitor(self, device_id, output_id):
         """Remove the specified signal from the monitors dictionary.
@@ -116,17 +119,20 @@ class Monitors:
             return None
 
     def record_signals(self):
-        """Record the current signal level for every monitor.
+        """Record the current signal level for every output signal.
 
-        This function is called at every simulation cycle.
+        This function is called at every simulation cycle.  Recording every
+        output keeps traces continuous even if the user starts monitoring a
+        signal only after several cycles have already completed.
         """
-        for trace_dictionary in [
-                self.monitors_dictionary, self.inactive_monitors_dictionary]:
-            for device_id, output_id in trace_dictionary:
+        for device_id in self.devices.find_devices():
+            device = self.devices.get_device(device_id)
+            for output_id in device.outputs:
+                key = (device_id, output_id)
                 signal_level = self.network.get_output_signal(
                     device_id, output_id
                 )
-                trace_dictionary[(device_id, output_id)].append(signal_level)
+                self._signal_history_for(key).append(signal_level)
 
     def get_signal_names(self):
         """Return two signal name lists: monitored and not monitored."""
@@ -151,10 +157,12 @@ class Monitors:
 
         The list of stored signal levels for each monitor is deleted.
         """
+        for signal_history in self.signal_history_dictionary.values():
+            signal_history.clear()
         for trace_dictionary in [
                 self.monitors_dictionary, self.inactive_monitors_dictionary]:
-            for device_id, output_id in trace_dictionary:
-                trace_dictionary[(device_id, output_id)] = []
+            for key in list(trace_dictionary):
+                trace_dictionary[key] = self._signal_history_for(key)
 
     def get_margin(self):
         """Return the length of the longest monitor's name.

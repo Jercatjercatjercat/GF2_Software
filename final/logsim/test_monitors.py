@@ -197,3 +197,25 @@ def test_display_signals(capsys, new_monitors):
             "Clock1: -__--__--__--__--__-" in traces)
 
     assert "" in traces  # additional empty line at the end
+
+
+def test_monitor_added_late_uses_full_background_history(new_monitors):
+    """Test if newly monitored signals show cycles before being visible."""
+    names = new_monitors.names
+    devices = new_monitors.devices
+    network = new_monitors.network
+
+    [SW3_ID] = names.lookup(["Sw3"])
+    devices.make_device(SW3_ID, devices.SWITCH, 0)
+
+    network.execute_network()
+    new_monitors.record_signals()
+
+    devices.set_switch(SW3_ID, devices.HIGH)
+    network.execute_network()
+    new_monitors.record_signals()
+
+    assert (SW3_ID, None) not in new_monitors.monitors_dictionary
+    assert new_monitors.make_monitor(SW3_ID, None) == new_monitors.NO_ERROR
+    assert new_monitors.monitors_dictionary[(SW3_ID, None)] == [
+        devices.LOW, devices.HIGH]
